@@ -1,0 +1,81 @@
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import pg from 'pg';
+import { ErrorCode } from '../common/filters/error-codes.js';
+import { ApiException } from '../common/http/api.exception.js';
+
+const { Pool } = pg;
+
+export interface Queryable {
+  query<T extends pg.QueryResultRow>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<T[]>;
+}
+
+@Injectable()
+export class DatabaseService implements Queryable, OnModuleDestroy {
+  private readonly logger = new Logger(DatabaseService.name);
+  private pool: pg.Pool | null = null;
+
+  constructor(private readonly config: ConfigService) {}
+
+  async query<T extends pg.QueryResultRow>(
+    sql: string,
+    params: unknown[] = [],
+  ): Promise<T[]> {
+    const result = await this.getPool().query<T>(sql, params);
+    return result.rows;
+  }
+
+  async transaction<T>(fn: (db: Queryable) => Promise<T>): Promise<T> {
+    const client = await this.getPool().connect();
+    const db: Queryable = {
+      query: async (sql, params = []) => {
+        const result = await client.query(sql, params);
+        return result.rows;
+      },
+    };
+    try {
+      await client.query('begin');
+      const value = await fn(db);
+      await client.query('commit');
+      return value;
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.pool?.end();
+    this.pool = null;
+  }
+
+  private getPool(): pg.Pool {
+    if (this.pool) {
+      return this.pool;
+    }
+    const connectionString = this.config.get<string>('DATABASE_URL');
+    if (!connectionString) {
+      throw new ApiException(
+        503,
+        ErrorCode.INTERNAL_ERROR,
+        'Database is not configured. Set DATABASE_URL in .env.',
+      );
+    }
+    this.pool = new Pool({
+      connectionString,
+      max: 10,
+      ssl: connectionString.includes('supabase.co')
+        ? { rejectUnauthorized: false }
+        : undefined,
+    });
+    this.pool.on('error', (error) => {
+      this.logger.error(error.message);
+    });
+    return this.pool;
+  }
+}
