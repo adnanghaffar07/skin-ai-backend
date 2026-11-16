@@ -19,6 +19,8 @@ export interface ImageRow extends QueryResultRow {
 export interface EligibilityRow extends QueryResultRow {
   age_range: string | null;
   consent_id: string | null;
+  birth_date: string | null;
+  submission_found: boolean;
   submission_completed: boolean;
   face_scan_opt_in: string | null;
 }
@@ -40,11 +42,18 @@ export class ScansRepository {
       `
       select
         (select age_range from public.skin_profiles where user_id = $1) as age_range,
+        (select birth_date::text from public.user_profiles where user_id = $1) as birth_date,
         (
-          select c.id from public.consent_records c
-          where c.user_id = $1 and c.purpose = 'facial_image_processing' and c.granted and c.revoked_at is null
-          order by c.granted_at desc limit 1
+          select latest.id from (
+            select c.id, c.granted, c.revoked_at from public.consent_records c
+            where c.user_id = $1 and c.purpose = 'facial_image_processing'
+            order by c.granted_at desc limit 1
+          ) latest
+          where latest.granted and latest.revoked_at is null
         ) as consent_id,
+        exists (
+          select 1 from public.questionnaire_submissions q where q.id = $2 and q.user_id = $1
+        ) as submission_found,
         exists (
           select 1 from public.questionnaire_submissions q
           where q.id = $2 and q.user_id = $1 and q.status = 'completed'
@@ -61,6 +70,20 @@ export class ScansRepository {
       [userId, submissionId],
     );
     return rows[0];
+  }
+
+  /** Whether the latest facial-image consent is a grant. Withdrawing is a newer record, so the latest one decides. */
+  async hasLiveConsent(userId: string): Promise<boolean> {
+    const rows = await this.database.query<{ live: boolean }>(
+      `select coalesce((
+         select c.granted and c.revoked_at is null
+         from public.consent_records c
+         where c.user_id = $1 and c.purpose = 'facial_image_processing'
+         order by c.granted_at desc limit 1
+       ), false) as live`,
+      [userId],
+    );
+    return rows[0]?.live === true;
   }
 
   async findByIdempotencyKey(

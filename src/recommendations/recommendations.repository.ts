@@ -26,6 +26,8 @@ export interface ItemRow extends QueryResultRow {
 }
 
 export interface ProfileContext extends ProfileInput {
+  /** The submission exists and belongs to this user. */
+  submission_found: boolean;
   submission_completed: boolean;
   routine_level: string | null;
   profile_market: string | null;
@@ -39,6 +41,8 @@ export class RecommendationsRepository {
     const rows = await this.database.query<ProfileContext>(
       `
       select
+        exists (select 1 from public.questionnaire_submissions q
+                where q.id = $2 and q.user_id = $1) as submission_found,
         exists (select 1 from public.questionnaire_submissions q
                 where q.id = $2 and q.user_id = $1 and q.status = 'completed') as submission_completed,
         sp.self_reported_skin_type as skin_type,

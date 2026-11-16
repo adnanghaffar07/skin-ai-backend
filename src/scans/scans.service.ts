@@ -71,9 +71,17 @@ export class ScansService {
       user.id,
       body.submission_id,
     );
+    if (!eligibility.submission_found) {
+      throw new ApiException(
+        404,
+        ErrorCode.NOT_FOUND,
+        'Questionnaire submission not found.',
+      );
+    }
     assertCanCreateScan({
       hasLiveConsent: eligibility.consent_id !== null,
       ageRange: eligibility.age_range,
+      birthDate: eligibility.birth_date,
       submissionCompleted: eligibility.submission_completed,
       faceScanOptIn: eligibility.face_scan_opt_in,
     });
@@ -104,6 +112,7 @@ export class ScansService {
   ): Promise<UploadUrlResponseDto> {
     const scan = await this.requireScan(user.id, scanId);
     this.assertAwaitingUpload(scan);
+    await this.assertConsentStillLive(user.id);
     assertUploadAllowed(body.content_type, body.byte_size);
     const previous = await this.scans.getImage(scan.id);
     const objectKey = scanObjectKey(
@@ -137,6 +146,7 @@ export class ScansService {
   ): Promise<SubmitScanResponseDto> {
     const scan = await this.requireScan(user.id, scanId);
     this.assertAwaitingUpload(scan);
+    await this.assertConsentStillLive(user.id);
     const image = await this.scans.getImage(scan.id);
     if (!image) {
       throw new ApiException(
@@ -220,6 +230,17 @@ export class ScansService {
       throw new ApiException(404, ErrorCode.NOT_FOUND, 'Scan not found.');
     }
     return scan;
+  }
+
+  /** A person can withdraw consent after the scan was created; nothing is uploaded or submitted after that. */
+  private async assertConsentStillLive(userId: string): Promise<void> {
+    if (!(await this.scans.hasLiveConsent(userId))) {
+      throw new ApiException(
+        422,
+        ErrorCode.CONSENT_REQUIRED,
+        'Facial image processing consent is required before a scan.',
+      );
+    }
   }
 
   private assertAwaitingUpload(scan: ScanRow): void {

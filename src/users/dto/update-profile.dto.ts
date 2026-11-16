@@ -4,7 +4,31 @@ import {
   IsString,
   Matches,
   MaxLength,
+  Validate,
+  ValidatorConstraint,
+  type ValidatorConstraintInterface,
 } from 'class-validator';
+
+/** A real calendar date that is not in the future and not before 1900. */
+@ValidatorConstraint({ name: 'plausibleBirthDate', async: false })
+export class PlausibleBirthDate implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (typeof value !== 'string') {
+      return false;
+    }
+    const date = new Date(`${value}T00:00:00Z`);
+    return (
+      !Number.isNaN(date.getTime()) &&
+      date.toISOString().slice(0, 10) === value &&
+      date.getUTCFullYear() >= 1900 &&
+      date.getTime() <= Date.now()
+    );
+  }
+
+  defaultMessage(): string {
+    return 'birth_date must be a real date between 1900-01-01 and today';
+  }
+}
 
 export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'Amelia Jane' })
@@ -17,6 +41,7 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  @Validate(PlausibleBirthDate)
   birth_date?: string;
 
   @ApiPropertyOptional({ example: 'Missouri' })

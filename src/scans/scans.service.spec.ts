@@ -23,6 +23,7 @@ function build(overrides: {
   const repo = {
     get: vi.fn().mockResolvedValue(scanRow()),
     getImage: vi.fn().mockResolvedValue(null),
+    hasLiveConsent: vi.fn().mockResolvedValue(true),
     saveImage: vi.fn().mockResolvedValue(undefined),
     ...overrides.repo,
   };
@@ -151,5 +152,61 @@ describe('ScansService', () => {
     await service.cancel(user, 's1');
     expect(storage.delete).toHaveBeenCalledWith('k');
     expect(cancel).toHaveBeenCalledWith('s1');
+  });
+
+  it('answers 404 when the submission does not belong to the user', async () => {
+    const { service } = build({
+      repo: {
+        findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+        eligibility: vi.fn().mockResolvedValue({
+          age_range: 'age_25_34',
+          birth_date: null,
+          consent_id: 'c1',
+          submission_found: false,
+          submission_completed: false,
+          face_scan_opt_in: null,
+        }),
+      },
+    });
+    await expect(
+      service.create(user, 'key', { submission_id: 'x' }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('blocks a user whose profile date of birth says under 18', async () => {
+    const year = new Date().getUTCFullYear() - 10;
+    const { service } = build({
+      repo: {
+        findByIdempotencyKey: vi.fn().mockResolvedValue(null),
+        eligibility: vi.fn().mockResolvedValue({
+          age_range: 'age_25_34',
+          birth_date: `${year}-01-01`,
+          consent_id: 'c1',
+          submission_found: true,
+          submission_completed: true,
+          face_scan_opt_in: 'start_scan',
+        }),
+      },
+    });
+    await expect(
+      service.create(user, 'key', { submission_id: 'x' }),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('refuses an upload URL after consent was withdrawn', async () => {
+    const { service, storage } = build({
+      repo: { hasLiveConsent: vi.fn().mockResolvedValue(false) },
+    });
+    await expect(
+      service.uploadUrl(user, 's1', { content_type: 'image/jpeg', byte_size: 1000 }),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(storage.createSignedUpload).not.toHaveBeenCalled();
+  });
+
+  it('refuses to submit after consent was withdrawn', async () => {
+    const { service } = build({
+      repo: { hasLiveConsent: vi.fn().mockResolvedValue(false) },
+    });
+    await expect(service.submit(user, 's1')).rejects.toMatchObject({ status: 422 });
   });
 });

@@ -45,16 +45,30 @@ export function assertUploadAllowed(contentType: string, byteSize: number): void
   }
 }
 
+/** True when the date of birth (yyyy-mm-dd) says the person has not turned 18 yet. A missing or unreadable date is not under 18. */
+export function isUnder18(birthDate: string | null | undefined, today: Date = new Date()): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birthDate ?? '');
+  if (!match) {
+    return false;
+  }
+  const birth = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const turns18 = Date.UTC(Number(match[1]) + 18, Number(match[2]) - 1, Number(match[3]));
+  return Number.isFinite(birth) && turns18 > Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+}
+
 export interface ScanEligibilityInput {
   hasLiveConsent: boolean;
   ageRange: string | null;
+  /** Date of birth from the profile (yyyy-mm-dd), when the person entered one. */
+  birthDate?: string | null;
+  today?: Date;
   submissionCompleted: boolean;
   faceScanOptIn: string | null;
 }
 
 /** Create-scan gate: age first, then consent, then the onboarding choice. */
 export function assertCanCreateScan(input: ScanEligibilityInput): void {
-  if (input.ageRange === 'under_18') {
+  if (input.ageRange === 'under_18' || isUnder18(input.birthDate, input.today)) {
     throw new ApiException(
       403,
       ErrorCode.AGE_RESTRICTED,

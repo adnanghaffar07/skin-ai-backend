@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertCanCreateScan,
+  isUnder18,
   assertImageMatches,
   assertUploadAllowed,
   MAX_IMAGE_BYTES,
@@ -93,5 +94,26 @@ describe('assertImageMatches', () => {
 describe('scanObjectKey', () => {
   it('keeps the object under the owner prefix', () => {
     expect(scanObjectKey('u1', 's1', 'image/webp', 'n')).toBe('scans/u1/s1/n.webp');
+  });
+});
+
+describe('isUnder18', () => {
+  const today = new Date('2026-11-16T12:00:00Z');
+  it('is true until the 18th birthday', () => {
+    expect(isUnder18('2008-11-17', today)).toBe(true);
+    expect(isUnder18('2015-01-01', today)).toBe(true);
+  });
+  it('is false on and after the 18th birthday', () => {
+    expect(isUnder18('2008-11-16', today)).toBe(false);
+    expect(isUnder18('1995-05-05', today)).toBe(false);
+  });
+  it('is false when there is no usable date', () => {
+    expect(isUnder18(null, today)).toBe(false);
+    expect(isUnder18('not-a-date', today)).toBe(false);
+  });
+  it('blocks the create gate through the profile date of birth', () => {
+    expect(
+      codeOf(() => assertCanCreateScan({ ...ok, birthDate: '2015-01-01', today })),
+    ).toBe('AGE_RESTRICTED');
   });
 });

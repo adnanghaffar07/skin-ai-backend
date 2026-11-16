@@ -43,6 +43,13 @@ export class RecommendationsService {
       return this.present(existing);
     }
     const profile = await this.repo.loadProfile(user.id, body.submission_id);
+    if (!profile.submission_found) {
+      throw new ApiException(
+        404,
+        ErrorCode.NOT_FOUND,
+        'Questionnaire submission not found.',
+      );
+    }
     if (!profile.submission_completed) {
       throw new ApiException(
         422,
