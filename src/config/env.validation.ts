@@ -35,6 +35,22 @@ export class EnvironmentVariables {
   @IsString()
   @Matches(/^postgres(ql)?:\/\//)
   DATABASE_URL?: string;
+
+  /** PEM text of the database CA. When set, the TLS certificate is verified. */
+  @IsOptional()
+  @IsString()
+  DATABASE_SSL_CA?: string;
+
+  /** Comma-separated browser origins allowed by CORS. Empty in production means CORS is off. */
+  @IsOptional()
+  @IsString()
+  CORS_ORIGINS?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100000)
+  RATE_LIMIT_PER_MINUTE!: number;
 }
 
 export function validateEnv(
@@ -47,6 +63,9 @@ export function validateEnv(
       PORT: config.PORT ?? 3000,
       SUPABASE_URL: config.SUPABASE_URL ?? DEFAULT_SUPABASE_URL,
       DATABASE_URL: config.DATABASE_URL || undefined,
+      DATABASE_SSL_CA: config.DATABASE_SSL_CA || undefined,
+      CORS_ORIGINS: config.CORS_ORIGINS || undefined,
+      RATE_LIMIT_PER_MINUTE: config.RATE_LIMIT_PER_MINUTE ?? 120,
     },
     { enableImplicitConversion: true },
   );

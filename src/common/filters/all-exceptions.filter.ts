@@ -4,6 +4,7 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -19,6 +20,8 @@ export interface ApiErrorBody {
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger('Exceptions');
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
     const response = http.getResponse<Response>();
@@ -26,6 +29,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const requestId = readRequestId(request);
 
     const body = toErrorBody(exception, requestId);
+    if (body.statusCode >= 500) {
+      // Method, path without query, request id and message only. No body, headers or token.
+      this.logger.error(
+        `${request.method} ${request.path} ${body.statusCode} ${requestId}: ${exception instanceof Error ? exception.message : 'unknown error'}`,
+      );
+    }
     response.status(body.statusCode).json(body);
   }
 }

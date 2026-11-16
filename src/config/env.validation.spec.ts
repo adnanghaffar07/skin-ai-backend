@@ -7,6 +7,9 @@ describe('validateEnv', () => {
       PORT: 3000,
       SUPABASE_URL: DEFAULT_SUPABASE_URL,
       DATABASE_URL: undefined,
+      DATABASE_SSL_CA: undefined,
+      CORS_ORIGINS: undefined,
+      RATE_LIMIT_PER_MINUTE: 120,
     });
   });
 
@@ -16,7 +19,16 @@ describe('validateEnv', () => {
       PORT: 4100,
       SUPABASE_URL: DEFAULT_SUPABASE_URL,
       DATABASE_URL: undefined,
+      DATABASE_SSL_CA: undefined,
+      CORS_ORIGINS: undefined,
+      RATE_LIMIT_PER_MINUTE: 120,
     });
+  });
+
+  it('reads the rate limit and CORS origins', () => {
+    const env = validateEnv({ RATE_LIMIT_PER_MINUTE: '30', CORS_ORIGINS: 'https://a.test' });
+    expect(env.RATE_LIMIT_PER_MINUTE).toBe(30);
+    expect(env.CORS_ORIGINS).toBe('https://a.test');
   });
 
   it('rejects an unknown NODE_ENV', () => {

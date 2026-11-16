@@ -44,7 +44,7 @@ export class UsersRepository {
         ),
         ensured as (
           insert into public.user_profiles (user_id, display_name)
-          select id, $3 from upserted
+          select id, $3::text from upserted
           on conflict (user_id) do update
             set display_name = coalesce(public.user_profiles.display_name, excluded.display_name),
                 updated_at = now()
@@ -56,7 +56,7 @@ export class UsersRepository {
           u.role,
           u.status,
           u.deleted_at,
-          p.display_name,
+          coalesce(p.display_name, $3::text) as display_name,
           p.birth_date::text as birth_date,
           p.state_province,
           p.address_line,
@@ -80,7 +80,7 @@ export class UsersRepository {
           sub.id as submission_id
         from upserted u
         join ensured e on e.user_id = u.id
-        join public.user_profiles p on p.user_id = u.id
+        left join public.user_profiles p on p.user_id = u.id
         left join public.skin_profiles sp on sp.user_id = u.id
         left join lateral (
           select qs.id, qs.status::text as status

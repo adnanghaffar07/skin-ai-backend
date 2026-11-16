@@ -1,20 +1,42 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import type { NextFunction, Request, Response } from 'express';
+import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware.js';
+import { createRateLimiter } from './common/security/rate-limit.middleware.js';
+import { securityHeaders } from './common/security/security-headers.middleware.js';
 
 export function configureApp(app: INestApplication): void {
+  const config = app.get(ConfigService);
+  (app as NestExpressApplication).disable('x-powered-by');
+  const origins = (config.get<string>('CORS_ORIGINS') ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  // The mobile app does not use CORS. Outside development it stays off unless origins are listed.
+  const corsOrigin =
+    origins.length > 0 ? origins : config.get('NODE_ENV') === 'production' ? false : true;
   app.enableCors({
-    origin: true,
+    origin: corsOrigin,
     allowedHeaders: [
       'Content-Type',
       'Authorization',
       'x-request-id',
       'x-claim-token',
+      'Idempotency-Key',
     ],
   });
   const requestIds = new RequestIdMiddleware();
   app.use(requestIds.use.bind(requestIds));
+  app.use(securityHeaders);
+  const limiter = createRateLimiter(
+    config.get<number>('RATE_LIMIT_PER_MINUTE', 120),
+  );
+  app.use((request: Request, response: Response, next: NextFunction) =>
+    limiter.middleware(request, response, next),
+  );
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
     new ValidationPipe({
@@ -26,7 +48,7 @@ export function configureApp(app: INestApplication): void {
   );
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  const config = new DocumentBuilder()
+  const swagger = new DocumentBuilder()
     .setTitle('Clara Skin API')
     .setDescription(
       [
@@ -51,7 +73,7 @@ export function configureApp(app: INestApplication): void {
       'bearer',
     )
     .build();
-  const document = SwaggerModule.createDocument(app, config);
+  const document = SwaggerModule.createDocument(app, swagger);
   SwaggerModule.setup('api/docs', app, document, {
     swaggerOptions: { persistAuthorization: true },
   });

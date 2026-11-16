@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { ConnectionOptions } from 'node:tls';
 import pg from 'pg';
 import { ErrorCode } from '../common/filters/error-codes.js';
 import { ApiException } from '../common/http/api.exception.js';
@@ -54,6 +55,17 @@ export class DatabaseService implements Queryable, OnModuleDestroy {
     this.pool = null;
   }
 
+  /** With DATABASE_SSL_CA the certificate is verified. Without it Supabase connections stay encrypted but unverified. */
+  private sslOptions(connectionString: string): ConnectionOptions | undefined {
+    const ca = this.config.get<string>('DATABASE_SSL_CA');
+    if (ca) {
+      return { ca, rejectUnauthorized: true };
+    }
+    return connectionString.includes('supabase.co')
+      ? { rejectUnauthorized: false }
+      : undefined;
+  }
+
   private getPool(): pg.Pool {
     if (this.pool) {
       return this.pool;
@@ -69,9 +81,7 @@ export class DatabaseService implements Queryable, OnModuleDestroy {
     this.pool = new Pool({
       connectionString,
       max: 10,
-      ssl: connectionString.includes('supabase.co')
-        ? { rejectUnauthorized: false }
-        : undefined,
+      ssl: this.sslOptions(connectionString),
     });
     this.pool.on('error', (error) => {
       this.logger.error(error.message);
