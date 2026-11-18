@@ -6,10 +6,40 @@ import { assertAnswerCodes, type AnswerQuestion } from './answer-rules.js';
 export interface FormAnswerInput {
   question_key: string;
   option_codes: string[];
+  text_value?: string | null;
 }
 
 export interface FormQuestion extends AnswerQuestion {
   required: boolean;
+}
+
+/** Question 7 answers that mean "yes, I reacted", the only ones that can carry the optional free-text follow-up. */
+const REACTION_YES_CODES = ['knows_ingredient', 'unknown_cause'];
+
+/** The free text sent with the form, trimmed and by question. Blank text counts as no text. */
+export function assertFormTexts(
+  answers: FormAnswerInput[],
+): Record<string, string> {
+  const texts: Record<string, string> = {};
+  for (const answer of answers) {
+    const text = answer.text_value?.trim();
+    if (!text) {
+      continue;
+    }
+    const allowed =
+      answer.question_key === 'reaction_history' &&
+      answer.option_codes.some((code) => REACTION_YES_CODES.includes(code));
+    if (!allowed) {
+      throw new ApiException(
+        HttpStatus.BAD_REQUEST,
+        ErrorCode.VALIDATION_ERROR,
+        'Details are only accepted when a skincare reaction is reported.',
+        [{ question_key: answer.question_key }],
+      );
+    }
+    texts[answer.question_key] = text;
+  }
+  return texts;
 }
 
 export function assertOnboardingForm(

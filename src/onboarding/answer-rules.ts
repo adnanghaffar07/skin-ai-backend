@@ -10,6 +10,12 @@ export interface AnswerQuestion {
   allowedCodes: string[];
 }
 
+/** Answers that mean "none of the others", so they cannot be picked alongside another option. */
+export const EXCLUSIVE_OPTIONS: Record<string, string> = {
+  product_interests: 'recommend_for_me',
+  skin_concerns: 'none_general_maintenance',
+};
+
 export function assertAnswerCodes(
   question: AnswerQuestion,
   optionCodes: string[],
@@ -44,15 +50,12 @@ export function assertAnswerCodes(
       })),
     );
   }
-  if (
-    question.key === 'product_interests' &&
-    optionCodes.includes('recommend_for_me') &&
-    optionCodes.length > 1
-  ) {
+  const exclusive = EXCLUSIVE_OPTIONS[question.key];
+  if (exclusive && optionCodes.includes(exclusive) && optionCodes.length > 1) {
     throw new ApiException(
       HttpStatus.UNPROCESSABLE_ENTITY,
       ErrorCode.EXCLUSIVE_OPTION,
-      'recommend_for_me cannot be combined with other product types.',
+      `${exclusive} cannot be combined with other options.`,
       [{ question_key: question.key }],
     );
   }

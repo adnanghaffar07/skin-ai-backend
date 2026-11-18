@@ -28,6 +28,21 @@ describe('assertAnswerCodes', () => {
     ).toThrow(/recommend_for_me/);
   });
 
+  it('rejects none_general_maintenance mixed with a concern', () => {
+    expect(() =>
+      assertAnswerCodes(
+        {
+          key: 'skin_concerns',
+          selectionMode: 'multi',
+          minSelections: 1,
+          maxSelections: null,
+          allowedCodes: ['fine_lines', 'none_general_maintenance'],
+        },
+        ['none_general_maintenance', 'fine_lines'],
+      ),
+    ).toThrow(/none_general_maintenance/);
+  });
+
   it('rejects a code that is not on this version', () => {
     expect(() => assertAnswerCodes(productInterests, ['toner'])).toThrow(
       /not on this questionnaire version/,

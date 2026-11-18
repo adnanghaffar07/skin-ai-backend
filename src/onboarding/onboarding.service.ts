@@ -8,7 +8,7 @@ import type {
   OnboardingFormResponseDto,
   SubmitOnboardingFormDto,
 } from './dto/onboarding.dto.js';
-import { assertOnboardingForm } from './form-rules.js';
+import { assertFormTexts, assertOnboardingForm } from './form-rules.js';
 import { OnboardingRepository } from './onboarding.repository.js';
 
 @Injectable()
@@ -40,13 +40,20 @@ export class OnboardingService {
       })),
       input.answers,
     );
+    const texts = assertFormTexts(input.answers);
     const saved = await this.onboarding.saveCompletedForm({
       userId: user.id,
       definitionId: questionnaire.id,
       version: questionnaire.version,
       answers,
+      texts,
     });
-    return this.toForm(saved.submissionId, questionnaire.version, answers);
+    return this.toForm(
+      saved.submissionId,
+      questionnaire.version,
+      answers,
+      texts,
+    );
   }
 
   async latestForm(
@@ -61,7 +68,8 @@ export class OnboardingService {
       );
     }
     const answers = await this.onboarding.listAnswers(submission.id);
-    return this.toForm(submission.id, submission.version, answers);
+    const texts = await this.onboarding.listAnswerTexts(submission.id);
+    return this.toForm(submission.id, submission.version, answers, texts);
   }
 
   private async activeQuestionnaire(): Promise<ActiveQuestionnaireDto> {
@@ -80,6 +88,7 @@ export class OnboardingService {
     submissionId: string,
     version: number,
     answers: Record<string, string[]>,
+    texts: Record<string, string>,
   ): OnboardingFormResponseDto {
     return {
       submission_id: submissionId,
@@ -88,6 +97,7 @@ export class OnboardingService {
       answers: Object.entries(answers).map(([question_key, option_codes]) => ({
         question_key,
         option_codes,
+        ...(texts[question_key] ? { text_value: texts[question_key] } : {}),
       })),
       face_scan_opt_in: answers.face_scan_opt_in?.[0] ?? null,
     };

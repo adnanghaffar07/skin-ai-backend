@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsOptional,
   IsString,
   MaxLength,
   ValidateNested,
@@ -192,6 +193,19 @@ export class FormAnswerDto {
   @IsString({ each: true })
   @MaxLength(64, { each: true })
   option_codes!: string[];
+
+  @ApiPropertyOptional({
+    type: String,
+    example: 'Retinol serum',
+    nullable: true,
+    maxLength: 500,
+    description:
+      'Optional follow-up for reaction_history when the answer is knows_ingredient or unknown_cause.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  text_value?: string | null;
 }
 
 export class SubmitOnboardingFormDto {

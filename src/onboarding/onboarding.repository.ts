@@ -357,6 +357,19 @@ export class OnboardingRepository {
     return grouped;
   }
 
+  async listAnswerTexts(submissionId: string): Promise<Record<string, string>> {
+    const rows = await this.database.query<{ key: string; text_value: string }>(
+      `
+      select q.key, a.text_value
+      from public.questionnaire_answers a
+      join public.questionnaire_questions q on q.id = a.question_id
+      where a.submission_id = $1 and a.text_value is not null
+      `,
+      [submissionId],
+    );
+    return Object.fromEntries(rows.map((row) => [row.key, row.text_value]));
+  }
+
   async markCompleted(
     db: Queryable,
     submissionId: string,
@@ -393,7 +406,10 @@ export class OnboardingRepository {
     answers: Record<string, string[]>,
   ): Promise<void> {
     const single = (key: string) => answers[key]?.[0] ?? null;
-    const concerns = answers.skin_concerns ?? [];
+    // "None / General maintenance" is an answer, not a concern to plan a routine around.
+    const concerns = (answers.skin_concerns ?? []).filter(
+      (code) => code !== 'none_general_maintenance',
+    );
     const categories = (answers.product_interests ?? []).filter(
       (code) => code !== 'recommend_for_me',
     );
@@ -468,11 +484,13 @@ export class OnboardingRepository {
     definitionId: string;
     version: number;
     answers: Record<string, string[]>;
+    texts: Record<string, string>;
   }): Promise<{ sessionId: string; submissionId: string }> {
     const pairs = Object.entries(input.answers).flatMap(([questionKey, codes]) =>
       codes.map((optionCode) => ({
         question_key: questionKey,
         option_code: optionCode,
+        text_value: input.texts[questionKey] ?? null,
       })),
     );
     return this.database.transaction(async (db) => {
@@ -502,11 +520,11 @@ export class OnboardingRepository {
       const submissionId = submissions[0].id;
       const inserted = await db.query<{ id: string }>(
         `
-        insert into public.questionnaire_answers (submission_id, question_id, option_id)
-        select $1, q.id, o.id
+        insert into public.questionnaire_answers (submission_id, question_id, option_id, text_value)
+        select $1, q.id, o.id, incoming.text_value
         from public.questionnaire_questions q
         join public.questionnaire_options o on o.question_id = q.id
-        join jsonb_to_recordset($2::jsonb) as incoming(question_key text, option_code text)
+        join jsonb_to_recordset($2::jsonb) as incoming(question_key text, option_code text, text_value text)
           on incoming.question_key = q.key and incoming.option_code = o.code
         where q.definition_id = $3
         returning id
