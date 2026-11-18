@@ -11,6 +11,10 @@ import { securityHeaders } from './common/security/security-headers.middleware.j
 export function configureApp(app: INestApplication): void {
   const config = app.get(ConfigService);
   (app as NestExpressApplication).disable('x-powered-by');
+  // Vercel's proxy reports the caller's address; without this every user would share one rate limit.
+  if (process.env.VERCEL) {
+    (app as NestExpressApplication).set('trust proxy', 1);
+  }
   const origins = (config.get<string>('CORS_ORIGINS') ?? '')
     .split(',')
     .map((origin) => origin.trim())

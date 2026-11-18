@@ -19,4 +19,9 @@ async function bootstrap(): Promise<void> {
     'Bootstrap',
   );
 }
-await bootstrap();
+
+// Not awaited at the top level: Vercel finishes loading this file before it lets the server start listening.
+bootstrap().catch((error: unknown) => {
+  Logger.error(error instanceof Error ? error.message : String(error), 'Bootstrap');
+  process.exit(1);
+});

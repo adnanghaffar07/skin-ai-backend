@@ -80,7 +80,8 @@ export class DatabaseService implements Queryable, OnModuleDestroy {
     }
     this.pool = new Pool({
       connectionString,
-      max: 10,
+      // Each Vercel instance keeps few connections, so many instances cannot exhaust the database pooler.
+      max: process.env.VERCEL ? 3 : 10,
       ssl: this.sslOptions(connectionString),
     });
     this.pool.on('error', (error) => {
