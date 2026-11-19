@@ -25,7 +25,8 @@ function readDisplayName(payload: JWTPayload): string | null {
     return null;
   }
   const record = metadata as Record<string, unknown>;
-  const value = record.full_name ?? record.name;
+  // The mobile app signs people up with `display_name`; Supabase's own forms and social providers use the other two.
+  const value = record.display_name ?? record.full_name ?? record.name;
   if (typeof value !== 'string') {
     return null;
   }
