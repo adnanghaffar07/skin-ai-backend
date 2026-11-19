@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AccountModule } from './account/account.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuditModule } from './audit/audit.module.js';
@@ -31,6 +32,7 @@ import { UsersModule } from './users/users.module.js';
     AuditModule,
     HealthModule,
     UsersModule,
+    AccountModule,
     ConsentsModule,
     PreferencesModule,
     OnboardingModule,
