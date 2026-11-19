@@ -1,3 +1,5 @@
+import { ceilingFor, fitToBudget } from './budget.js';
+
 export const RULE_VERSION = '2026-11-11';
 
 export const CORE_CATEGORIES = [
@@ -44,7 +46,12 @@ export interface RankedProduct extends Candidate {
 }
 
 export interface Plan {
+  /** The picks within the person's monthly budget (all of the best picks when there is no budget). */
   products: RankedProduct[];
+  /** The best pick of each category regardless of price. Shown under the budget picks, marked as above budget. */
+  best: RankedProduct[];
+  /** The monthly ceiling the picks were fitted to; null when the person set no budget. */
+  budget_ceiling: number | null;
   limitations: string[];
 }
 
@@ -79,6 +86,14 @@ const BUDGET_IDEAL_PRICE: Record<string, number> = {
   '20_50': 12.5,
   '50_100': 25,
 };
+
+/** Limitations explaining how the budget shaped the plan. */
+export function budgetLimitations(fit: { over: boolean; dropped: string[] }): string[] {
+  return [...(fit.over ? ['over_budget'] : []), ...fit.dropped.map((category) => `budget_left_out_${category}`)];
+}
+
+/** Numbers each list 1, 2, 3... in order. */
+export const ranked = <T extends RankedProduct>(items: T[]): T[] => items.map((item, index) => ({ ...item, rank: index + 1 }));
 
 const matches = (text: string, words: string[]): boolean =>
   words.some((word) => text.includes(word));
@@ -166,20 +181,18 @@ export function buildPlan(candidates: Candidate[], profile: ProfileInput): Plan 
       a.name.localeCompare(b.name) ||
       a.id.localeCompare(b.id),
   );
-  const best = new Map<string, RankedProduct>();
+  const options = new Map<string, RankedProduct[]>();
   for (const product of eligible) {
-    if (!best.has(product.category_code)) {
-      best.set(product.category_code, product);
-    }
+    options.set(product.category_code, [...(options.get(product.category_code) ?? []), product]);
   }
-  const products = CATEGORY_ORDER.flatMap((category) => {
-    const found = best.get(category);
-    return found ? [found] : [];
-  }).map((product, index) => ({ ...product, rank: index + 1 }));
+  const best = ranked(CATEGORY_ORDER.flatMap((category) => options.get(category)?.slice(0, 1) ?? []));
+  const ceiling = ceilingFor(profile.budget_band);
+  const fit = fitToBudget(options, [...CATEGORY_ORDER], ceiling);
+  budgetLimitations(fit).forEach((code) => limitations.add(code));
   for (const category of wanted) {
-    if (!best.has(category)) {
+    if (!options.has(category)) {
       limitations.add(`no_product_for_${category}`);
     }
   }
-  return { products, limitations: [...limitations].sort() };
+  return { products: ranked(fit.picks), best, budget_ceiling: ceiling, limitations: [...limitations].sort() };
 }

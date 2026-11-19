@@ -136,3 +136,33 @@ describe('buildRoutineSteps', () => {
     expect(steps.filter((s) => s.period === 'evening').map((s) => s.position)).toEqual([1, 2, 3]);
   });
 });
+
+describe('buildPlan with a monthly budget', () => {
+  const candidates = [
+    product({ id: 'c-best', category_code: 'cleansers', amount: 30, text: 'for dry skin, hydrating' }),
+    product({ id: 'c-cheap', category_code: 'cleansers', amount: 9, text: 'hydrating' }),
+    product({ id: 'm-best', category_code: 'moisturizers', amount: 45, text: 'dry skin hydration' }),
+    product({ id: 'm-cheap', category_code: 'moisturizers', amount: 14, text: 'hydration' }),
+  ];
+  const twoSteps = { ...profile, categories: ['cleansers', 'moisturizers'] };
+
+  it('fits the picks to the budget and keeps the best picks apart', () => {
+    const plan = buildPlan(candidates, { ...twoSteps, budget_band: '20_50' });
+    expect(plan.budget_ceiling).toBe(50);
+    expect(plan.products.map((p) => p.id)).toEqual(['c-best', 'm-cheap']);
+    expect(plan.products.reduce((sum, p) => sum + p.amount, 0)).toBeLessThanOrEqual(50);
+    expect(plan.best.map((p) => [p.id, p.rank])).toEqual([['c-best', 1], ['m-best', 2]]);
+  });
+
+  it('gives the same picks for both when there is no budget', () => {
+    const plan = buildPlan(candidates, { ...twoSteps, budget_band: 'no_budget' });
+    expect(plan.budget_ceiling).toBeNull();
+    expect(plan.products.map((p) => p.id)).toEqual(plan.best.map((p) => p.id));
+  });
+
+  it('says when even the cheapest routine is over budget', () => {
+    const plan = buildPlan(candidates, { ...twoSteps, budget_band: 'under_20' });
+    expect(plan.products.map((p) => p.id)).toEqual(['c-cheap', 'm-cheap']);
+    expect(plan.limitations).toContain('over_budget');
+  });
+});

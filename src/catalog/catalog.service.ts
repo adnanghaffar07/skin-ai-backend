@@ -60,7 +60,7 @@ export class CatalogService {
   ) {}
 
   async list(
-    user: AuthenticatedUser,
+    user: AuthenticatedUser | null,
     query: ListProductsQueryDto,
   ): Promise<ProductListDto> {
     const market = await this.resolveMarket(user, query.market);
@@ -84,7 +84,7 @@ export class CatalogService {
   }
 
   async get(
-    user: AuthenticatedUser,
+    user: AuthenticatedUser | null,
     productId: string,
     market?: string,
   ): Promise<ProductDetailDto> {
@@ -105,11 +105,19 @@ export class CatalogService {
   }
 
   private async resolveMarket(
-    user: AuthenticatedUser,
+    user: AuthenticatedUser | null,
     requested: string | undefined,
   ): Promise<string> {
     if (requested) {
       return requested;
+    }
+    // A guest has no profile to take the market from.
+    if (!user) {
+      throw new ApiException(
+        422,
+        ErrorCode.MARKET_REQUIRED,
+        'Pass market when not signed in.',
+      );
     }
     await this.users.getMe(user);
     const market = await this.catalog.marketOf(user.id);

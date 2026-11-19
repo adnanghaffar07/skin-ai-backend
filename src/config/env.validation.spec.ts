@@ -10,6 +10,11 @@ describe('validateEnv', () => {
       DATABASE_SSL_CA: undefined,
       CORS_ORIGINS: undefined,
       RATE_LIMIT_PER_MINUTE: 120,
+      AI_SERVICE_MODE: 'off',
+      AI_SERVICE_URL: undefined,
+      AI_SERVICE_KEY: undefined,
+      AI_TIMEOUT_MS: 30000,
+      PRICE_MARKUP_PERCENT: 8.5,
     });
   });
 
@@ -22,6 +27,11 @@ describe('validateEnv', () => {
       DATABASE_SSL_CA: undefined,
       CORS_ORIGINS: undefined,
       RATE_LIMIT_PER_MINUTE: 120,
+      AI_SERVICE_MODE: 'off',
+      AI_SERVICE_URL: undefined,
+      AI_SERVICE_KEY: undefined,
+      AI_TIMEOUT_MS: 30000,
+      PRICE_MARKUP_PERCENT: 8.5,
     });
   });
 
@@ -44,5 +54,29 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ PORT: 'not-a-port' })).toThrow(
       /Environment validation failed/,
     );
+  });
+
+  it('uses the AI service when its address is set', () => {
+    const env = validateEnv({ AI_SERVICE_URL: 'https://ai.example.com', AI_SERVICE_KEY: 'secret', PRICE_MARKUP_PERCENT: '10' });
+    expect(env.AI_SERVICE_MODE).toBe('http');
+    expect(env.PRICE_MARKUP_PERCENT).toBe(10);
+  });
+
+  it('needs a key to call the AI service', () => {
+    expect(() => validateEnv({ AI_SERVICE_URL: 'https://ai.example.com' })).toThrow(/AI_SERVICE_KEY/);
+  });
+
+  it('refuses a plain-http AI service', () => {
+    expect(() => validateEnv({ AI_SERVICE_URL: 'http://ai.example.com', AI_SERVICE_KEY: 'secret' })).toThrow(/Environment validation failed/);
+  });
+
+  it('never allows the stand-in AI in production', () => {
+    expect(validateEnv({ AI_SERVICE_MODE: 'stub' }).AI_SERVICE_MODE).toBe('stub');
+    expect(() => validateEnv({ AI_SERVICE_MODE: 'stub', NODE_ENV: 'production' })).toThrow(/not allowed in production/);
+  });
+
+  it('rejects a markup outside 0-100 percent', () => {
+    expect(() => validateEnv({ PRICE_MARKUP_PERCENT: '-1' })).toThrow(/Environment validation failed/);
+    expect(() => validateEnv({ PRICE_MARKUP_PERCENT: '150' })).toThrow(/Environment validation failed/);
   });
 });

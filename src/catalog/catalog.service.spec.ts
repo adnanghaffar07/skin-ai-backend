@@ -69,6 +69,21 @@ describe('CatalogService', () => {
     await expect(service.list(user, {})).rejects.toMatchObject({ status: 422 });
   });
 
+  it('lists for a guest when the market is given', async () => {
+    const list = vi.fn().mockResolvedValue([row(1)]);
+    const service = build({ list });
+    const page = await service.list(null, { market: 'US' });
+    expect(page.items).toHaveLength(1);
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ market: 'US' }));
+  });
+
+  it('asks a guest for a market instead of reading a profile', async () => {
+    const marketOf = vi.fn();
+    const service = build({ marketOf });
+    await expect(service.list(null, {})).rejects.toMatchObject({ status: 422 });
+    expect(marketOf).not.toHaveBeenCalled();
+  });
+
   it('answers 404 for an unavailable product', async () => {
     const service = build({ get: vi.fn().mockResolvedValue(null) });
     await expect(service.get(user, 'x', 'US')).rejects.toMatchObject({ status: 404 });

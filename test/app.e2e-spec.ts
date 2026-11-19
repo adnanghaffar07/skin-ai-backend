@@ -61,6 +61,24 @@ describe('AppController (e2e)', () => {
       });
   });
 
+  it('lets a guest browse products without a token', () => {
+    return request(app.getHttpServer())
+      .get('/api/v1/products?market=US')
+      .expect((response) => {
+        // No database in this test, so the call cannot succeed, but it must get past the login check.
+        expect(response.status).not.toBe(401);
+      });
+  });
+
+  it('asks a guest for a market', () => {
+    return request(app.getHttpServer())
+      .get('/api/v1/products')
+      .expect(422)
+      .expect((response) => {
+        expect(response.body.code).toBe('MARKET_REQUIRED');
+      });
+  });
+
   it('lists the phase 1 routes in the OpenAPI document', () => {
     return request(app.getHttpServer())
       .get('/api/docs-json')

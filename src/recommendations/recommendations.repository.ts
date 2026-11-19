@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { DatabaseService } from '../database/database.service.js';
-import type { Candidate, Plan, ProfileInput } from './ranking.js';
-import { RULE_VERSION } from './ranking.js';
+import type { Candidate, ProfileInput, RankedProduct } from './ranking.js';
 import type { RoutineStepDraft } from './routine-template.js';
 
 export interface SetRow extends QueryResultRow {
@@ -10,7 +9,29 @@ export interface SetRow extends QueryResultRow {
   basis: string;
   rule_version: string;
   limitations: string[];
+  summary: string | null;
+  budget_ceiling: string | null;
 }
+
+/** A product to save in a plan: rule-based picks have no explanation, AI picks may. */
+export type PlanItem = Pick<RankedProduct, 'id' | 'variant_id' | 'rank' | 'currency_code' | 'amount' | 'reason_codes'> & { explanation?: string | null };
+
+export interface AiRunRecord {
+  userId: string;
+  submissionId: string;
+  setId: string | null;
+  provider: string;
+  status: 'succeeded' | 'failed';
+  modelVersion: string | null;
+  schemaVersion: string | null;
+  confidence: string | null;
+  returned: number;
+  kept: number;
+  latencyMs: number | null;
+  errorCode: string | null;
+}
+
+const SET_COLUMNS = 'id, basis::text as basis, rule_version, limitations, summary, budget_ceiling::text as budget_ceiling';
 
 export interface ItemRow extends QueryResultRow {
   product_id: string;
@@ -23,6 +44,7 @@ export interface ItemRow extends QueryResultRow {
   amount: string;
   reason_codes: string[];
   explanation: string | null;
+  tier: 'budget' | 'best';
 }
 
 export interface ProfileContext extends ProfileInput {
@@ -31,6 +53,11 @@ export interface ProfileContext extends ProfileInput {
   submission_completed: boolean;
   routine_level: string | null;
   profile_market: string | null;
+  age_range: string | null;
+  sensitivity_level: string | null;
+  reaction_history: string | null;
+  /** The optional "which product or ingredient?" text under the reactions question. */
+  reaction_details: string | null;
 }
 
 @Injectable()
@@ -47,6 +74,14 @@ export class RecommendationsRepository {
                 where q.id = $2 and q.user_id = $1 and q.status = 'completed') as submission_completed,
         sp.self_reported_skin_type as skin_type,
         sp.current_routine_level as routine_level,
+        sp.age_range,
+        sp.sensitivity_level,
+        sp.reaction_history,
+        (select a.text_value from public.questionnaire_answers a
+         join public.questionnaire_questions q on q.id = a.question_id
+         join public.questionnaire_submissions s on s.id = a.submission_id
+         where a.submission_id = $2 and s.user_id = $1 and q.key = 'reaction_history' and a.text_value is not null
+         limit 1) as reaction_details,
         up.market_code as profile_market,
         pref.primary_goal,
         pref.monthly_budget_band as budget_band,
@@ -103,7 +138,7 @@ export class RecommendationsRepository {
 
   async findByIdempotencyKey(userId: string, key: string): Promise<SetRow | null> {
     const rows = await this.database.query<SetRow>(
-      `select id, basis::text as basis, rule_version, limitations
+      `select ${SET_COLUMNS}
        from public.recommendation_sets where user_id = $1 and idempotency_key = $2`,
       [userId, key],
     );
@@ -112,7 +147,7 @@ export class RecommendationsRepository {
 
   async latest(userId: string): Promise<SetRow | null> {
     const rows = await this.database.query<SetRow>(
-      `select id, basis::text as basis, rule_version, limitations
+      `select ${SET_COLUMNS}
        from public.recommendation_sets where user_id = $1
        order by created_at desc, id desc limit 1`,
       [userId],
@@ -123,12 +158,12 @@ export class RecommendationsRepository {
   items(setId: string): Promise<ItemRow[]> {
     return this.database.query<ItemRow>(
       `select i.product_id, i.variant_id, i.rank, p.name, b.name as brand, p.category_code,
-              i.currency_code, i.amount::text as amount, i.reason_codes, i.explanation
+              i.currency_code, i.amount::text as amount, i.reason_codes, i.explanation, i.tier
        from public.recommendation_items i
        join public.products p on p.id = i.product_id
        join public.brands b on b.id = p.brand_id
        where i.recommendation_set_id = $1
-       order by i.rank`,
+       order by i.tier desc, i.rank`,
       [setId],
     );
   }
@@ -139,28 +174,35 @@ export class RecommendationsRepository {
     submissionId: string;
     market: string;
     idempotencyKey: string;
-    plan: Plan;
+    basis: 'self_reported' | 'ai_assisted';
+    ruleVersion: string;
+    summary: string | null;
+    plan: { products: PlanItem[]; best: PlanItem[]; budget_ceiling: number | null; limitations: string[] };
     steps: RoutineStepDraft[];
   }): Promise<SetRow | null> {
     return this.database.transaction(async (db) => {
       const created = await db.query<SetRow>(
         `insert into public.recommendation_sets
-           (user_id, submission_id, basis, rule_version, market_code, idempotency_key, limitations)
-         values ($1, $2, 'self_reported', $3, $4, $5, $6)
+           (user_id, submission_id, basis, rule_version, market_code, idempotency_key, limitations, summary, budget_ceiling)
+         values ($1, $2, $3::public.recommendation_basis, $4, $5, $6, $7, $8, $9)
          on conflict do nothing
-         returning id, basis::text as basis, rule_version, limitations`,
-        [input.userId, input.submissionId, RULE_VERSION, input.market, input.idempotencyKey, input.plan.limitations],
+         returning ${SET_COLUMNS}`,
+        [input.userId, input.submissionId, input.basis, input.ruleVersion.slice(0, 32), input.market, input.idempotencyKey, input.plan.limitations, input.summary, input.plan.budget_ceiling],
       );
       const set = created[0];
       if (!set) {
         return null;
       }
-      for (const product of input.plan.products) {
+      const tiers = [
+        ...input.plan.products.map((product) => ({ product, tier: 'budget' })),
+        ...input.plan.best.map((product) => ({ product, tier: 'best' })),
+      ];
+      for (const { product, tier } of tiers) {
         await db.query(
           `insert into public.recommendation_items
-             (recommendation_set_id, product_id, variant_id, rank, currency_code, amount, reason_codes)
-           values ($1, $2, $3, $4, $5, $6, $7)`,
-          [set.id, product.id, product.variant_id, product.rank, product.currency_code, product.amount, product.reason_codes],
+             (recommendation_set_id, product_id, variant_id, rank, currency_code, amount, reason_codes, explanation, tier)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [set.id, product.id, product.variant_id, product.rank, product.currency_code, product.amount, product.reason_codes, product.explanation ?? null, tier],
         );
       }
       await db.query(
@@ -184,5 +226,16 @@ export class RecommendationsRepository {
       }
       return set;
     });
+  }
+
+  /** One row per call to the AI service, successful or not. Never fails the request that made it. */
+  async recordAiRun(run: AiRunRecord): Promise<void> {
+    await this.database.query(
+      `insert into public.ai_recommendation_runs
+         (user_id, submission_id, recommendation_set_id, provider, status, model_version, schema_version, confidence,
+          products_returned, products_kept, latency_ms, error_code)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [run.userId, run.submissionId, run.setId, run.provider, run.status, run.modelVersion, run.schemaVersion, run.confidence, run.returned, run.kept, run.latencyMs, run.errorCode],
+    );
   }
 }
