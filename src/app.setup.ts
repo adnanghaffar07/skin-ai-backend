@@ -78,7 +78,23 @@ export function configureApp(app: INestApplication): void {
     )
     .build();
   const document = SwaggerModule.createDocument(app, swagger);
+  // The bare domain has no content of its own, so visitors land on the API docs.
+  const http = app.getHttpAdapter();
+  for (const path of ['/', '/api']) {
+    http.get(path, (_request: Request, response: Response) =>
+      response.redirect('/api/docs'),
+    );
+  }
+
+  // Vercel does not bundle Swagger UI's static files, so the page loads them from a pinned CDN version.
+  const swaggerUi = 'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.34.0';
   SwaggerModule.setup('api/docs', app, document, {
+    customSiteTitle: 'Clara Skin API',
+    customCssUrl: `${swaggerUi}/swagger-ui.css`,
+    customJs: [
+      `${swaggerUi}/swagger-ui-bundle.js`,
+      `${swaggerUi}/swagger-ui-standalone-preset.js`,
+    ],
     swaggerOptions: { persistAuthorization: true },
   });
 }

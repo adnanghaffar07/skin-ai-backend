@@ -18,6 +18,13 @@ describe('AppController (e2e)', () => {
     await app.init();
   });
 
+  it.each(['/', '/api'])('%s redirects to the API docs', async (path) => {
+    await request(app.getHttpServer())
+      .get(path)
+      .expect(302)
+      .expect('Location', '/api/docs');
+  });
+
   it('/api/v1 (GET)', () => {
     return request(app.getHttpServer())
       .get('/api/v1')
