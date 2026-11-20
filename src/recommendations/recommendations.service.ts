@@ -69,7 +69,9 @@ export class RecommendationsService {
     private readonly users: UsersService,
     private readonly repo: RecommendationsRepository,
     @Optional() @Inject(AiRecommender) private readonly ai: AiRecommender | null = null,
-    @Optional() private readonly intake: ProductIntakeRepository | null = null,
+    // Named explicitly: with the type "ProductIntakeRepository | null" Nest cannot tell what to inject, and @Optional
+    // then quietly passes nothing, which turned the AI off for every plan.
+    @Optional() @Inject(ProductIntakeRepository) private readonly intake: ProductIntakeRepository | null = null,
     @Optional() @Inject(MARKUP_BP) private readonly markupBp: number = 850,
   ) {}
 
