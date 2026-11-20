@@ -1,7 +1,7 @@
 # Database design proposal
 
 **Date:** 2026-10-28  
-**Status:** Applied to Supabase project `skin-ai` (`awhulfitatettoqllejm`, eu-west-1) on 2026-10-28. The SQL lives in `supabase/migrations/`. Prisma is not connected yet because the database password stays in a local `.env`.  
+**Status:** Applied to Supabase project `skin-ai` (`awhulfitatettoqllejm`, eu-west-1) on 2026-10-28, then moved on 2026-11-20 to `skin-ai-dev` (`iwfcfomrrsltczksyoaz`, ap-south-1) in the CA organization. The SQL lives in `supabase/migrations/`. Prisma is not connected yet because the database password stays in a local `.env`.  
 **Engine:** PostgreSQL on Supabase, Prisma from Nest.  
 **Source:** Figma Design page `30:6`, scoped to onboarding and the skin dashboard.
 

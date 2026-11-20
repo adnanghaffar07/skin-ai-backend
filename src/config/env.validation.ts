@@ -13,10 +13,10 @@ export type PaymentsMode = (typeof PAYMENTS_MODES)[number];
 export type AiServiceMode = (typeof AI_SERVICE_MODES)[number];
 
 export const DEFAULT_SUPABASE_URL =
-  'https://awhulfitatettoqllejm.supabase.co';
+  'https://iwfcfomrrsltczksyoaz.supabase.co';
 export const DEFAULT_PUBLIC_BASE_URL = 'https://clara-skin-api.vercel.app';
 /** Supabase's publishable key is meant to be public (the app ships it too); the password-reset page needs it. */
-export const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_pu3AXxvoauy6gdniZbnxkg_jg9lKEBq';
+export const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_mc89QElgn31NiMWUX08kMw_4u1tdih2';
 
 export class EnvironmentVariables {
   @IsIn(NODE_ENVS)
