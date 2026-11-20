@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { DatabaseService } from '../database/database.service.js';
+import { STATUS_TIMESTAMP, type OrderStatus, type StatusChange } from './admin-order-rules.js';
 
 /** A product as it can be ordered right now: Clara's current price and where the team buys it. */
 export interface OrderableProduct extends QueryResultRow {
@@ -41,6 +42,7 @@ export interface OrderRow extends QueryResultRow {
   shipped_at: Date | null;
   delivered_at: Date | null;
   cancelled_at: Date | null;
+  refunded_at: Date | null;
   created_at: Date;
 }
 
@@ -82,7 +84,7 @@ const ORDER_COLUMNS = `
   o.subtotal_amount::text as subtotal_amount, o.shipping_option, o.shipping_amount::text as shipping_amount,
   o.total_amount::text as total_amount, o.contact_name, o.contact_email, o.contact_phone, o.shipping_address,
   o.delivery_note, o.payment_session_id, o.payment_session_url, o.carrier, o.tracking_number, o.paid_at, o.ordered_from_store_at,
-  o.shipped_at, o.delivered_at, o.cancelled_at, o.created_at
+  o.shipped_at, o.delivered_at, o.cancelled_at, o.refunded_at, o.created_at
 `;
 
 @Injectable()
@@ -181,10 +183,15 @@ export class OrdersRepository {
   async markPaid(orderId: string, sessionId: string, paymentIntentId: string | null): Promise<boolean> {
     const rows = await this.database.query(
       `
-      update public.orders set status = 'paid', paid_at = now(), payment_intent_id = $3,
-        payment_session_id = coalesce(payment_session_id, $2)
-      where id = $1 and status = 'pending_payment' and (payment_session_id is null or payment_session_id = $2)
-      returning id
+      with paid as (
+        update public.orders set status = 'paid', paid_at = now(), payment_intent_id = $3,
+          payment_session_id = coalesce(payment_session_id, $2)
+        where id = $1 and status = 'pending_payment' and (payment_session_id is null or payment_session_id = $2)
+        returning id
+      )
+      insert into public.order_status_events (order_id, from_status, to_status, note)
+      select id, 'pending_payment', 'paid', 'Paid on Stripe' from paid
+      returning order_id
       `,
       [orderId, sessionId, paymentIntentId],
     );
@@ -195,9 +202,14 @@ export class OrdersRepository {
   async markPaymentExpired(orderId: string, sessionId: string): Promise<boolean> {
     const rows = await this.database.query(
       `
-      update public.orders set status = 'cancelled', cancelled_at = now()
-      where id = $1 and status = 'pending_payment' and payment_session_id = $2
-      returning id
+      with expired as (
+        update public.orders set status = 'cancelled', cancelled_at = now()
+        where id = $1 and status = 'pending_payment' and payment_session_id = $2
+        returning id
+      )
+      insert into public.order_status_events (order_id, from_status, to_status, note)
+      select id, 'pending_payment', 'cancelled', 'Payment page expired without payment' from expired
+      returning order_id
       `,
       [orderId, sessionId],
     );
@@ -236,4 +248,96 @@ export class OrdersRepository {
       [orderIds],
     );
   }
+
+  // ---- For the team (admin endpoints) ----
+
+  /** Orders for the team, newest first, optionally of one status; `before` pages through older ones. */
+  adminList(status: OrderStatus | null, limit: number, before: Date | null): Promise<OrderRow[]> {
+    return this.database.query<OrderRow>(
+      `
+      select ${ORDER_COLUMNS} from public.orders o
+      where ($1::public.order_status is null or o.status = $1::public.order_status)
+        and ($2::timestamptz is null or o.created_at < $2::timestamptz)
+      order by o.created_at desc limit $3
+      `,
+      [status, before, limit],
+    );
+  }
+
+  async adminFind(orderId: string): Promise<OrderRow | null> {
+    const rows = await this.database.query<OrderRow>(`select ${ORDER_COLUMNS} from public.orders o where o.id = $1`, [orderId]);
+    return rows[0] ?? null;
+  }
+
+  /** Items with what the team needs to buy them: the store, its link and item number, and the store price. */
+  adminItems(orderIds: string[]): Promise<AdminItemRow[]> {
+    if (orderIds.length === 0) {
+      return Promise.resolve([]);
+    }
+    return this.database.query<AdminItemRow>(
+      `
+      select order_id, product_id, product_name, brand_name, image_url, quantity,
+        unit_amount::text as unit_amount, line_amount::text as line_amount,
+        retailer_name, retailer_url, retailer_external_id, store_unit_amount::text as store_unit_amount
+      from public.order_items where order_id = any($1::uuid[]) order by created_at, product_name
+      `,
+      [orderIds],
+    );
+  }
+
+  events(orderId: string): Promise<StatusEventRow[]> {
+    return this.database.query<StatusEventRow>(
+      `
+      select e.from_status::text as from_status, e.to_status::text as to_status, e.note, e.created_at,
+        u.email::text as actor_email
+      from public.order_status_events e left join public.users u on u.id = e.actor_user_id
+      where e.order_id = $1 order by e.created_at
+      `,
+      [orderId],
+    );
+  }
+
+  /**
+   * Moves an order from `from` to `change.to` and records who did it. Returns false when the order was no longer in
+   * `from` (someone else changed it first), so nothing is overwritten.
+   */
+  changeStatus(orderId: string, from: OrderStatus, change: StatusChange, actorId: string): Promise<boolean> {
+    const stamp = STATUS_TIMESTAMP[change.to];
+    return this.database.transaction(async (db) => {
+      const rows = await db.query(
+        `
+        update public.orders set status = $3::public.order_status,
+          carrier = coalesce($4, carrier), tracking_number = coalesce($5, tracking_number)
+          ${stamp ? `, ${stamp} = now()` : ''}
+        where id = $1 and status = $2::public.order_status
+        returning id
+        `,
+        [orderId, from, change.to, change.carrier?.trim() || null, change.trackingNumber?.trim() || null],
+      );
+      if (rows.length === 0) {
+        return false;
+      }
+      await db.query(
+        `insert into public.order_status_events (order_id, from_status, to_status, actor_user_id, note)
+         values ($1, $2::public.order_status, $3::public.order_status, $4, $5)`,
+        [orderId, from, change.to, actorId, change.note?.trim() || null],
+      );
+      return true;
+    });
+  }
+}
+
+export interface AdminItemRow extends OrderItemRow {
+  retailer_name: string | null;
+  retailer_url: string | null;
+  retailer_external_id: string | null;
+  store_unit_amount: string | null;
+}
+
+export interface StatusEventRow extends QueryResultRow {
+  from_status: string | null;
+  to_status: string;
+  note: string | null;
+  created_at: Date;
+  actor_email: string | null;
 }

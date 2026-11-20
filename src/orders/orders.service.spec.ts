@@ -49,6 +49,7 @@ const order = (over: Partial<OrderRow> = {}): OrderRow => ({
   shipped_at: null,
   delivered_at: null,
   cancelled_at: null,
+  refunded_at: null,
   created_at: new Date('2026-11-21T10:00:00Z'),
   ...over,
 });
