@@ -238,7 +238,9 @@ Clara drops individual products that break the rules (missing price, wrong curre
 
 ## 6. Face scan: decision needed
 
-Today the photo is analysed on the phone and **never leaves it**; the consent screen says so. Two ways forward:
+**Update 21 Nov 2026: option 1 is live, in the AI service's v1.1 shape.** When the person has done a face scan, Clara sends `"scan": { "redness": "none", "shine": "mild", "darkCircles": "none", "blemishes": "moderate" }` (levels `none`, `mild`, `moderate`, `high`), with `"schema_version": "1.1"`. It is sent only when all four were read; otherwise, and without a scan, `scan` is `null`. Please read it when present and mark photo-based items `"source": "photo"`. Photos people opted in to sharing are also stored for training (section 6b), but they are not sent with each request.
+
+The photo is analysed on the phone; the original two options were:
 
 1. **Findings only (no change to privacy):** the phone keeps analysing the photo and Clara sends the findings in `scan`:
    ```json

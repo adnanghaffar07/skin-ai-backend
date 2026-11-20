@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AiProduct } from '../ai/ai.types.js';
 import type { SavedProduct } from '../ai/product-intake.repository.js';
-import { planFromAi, routineProducts, toAiRequest } from './ai-plan.js';
+import { cleanScan, planFromAi, routineProducts, toAiRequest } from './ai-plan.js';
 import type { ProfileContext } from './recommendations.repository.js';
 
 const profile = (over: Partial<ProfileContext> = {}): ProfileContext => ({
@@ -136,5 +136,66 @@ describe('planFromAi with a monthly budget', () => {
     // Other picks priced within the monthly budget follow the routine; the $43.40 moisturiser fits on its own.
     expect(plan.products.map((p) => p.id)).toEqual(['p-c-best', 'p-m-cheap', 'p-c-cheap', 'p-m-best']);
     expect(plan.best.map((p) => p.id)).toEqual(['p-c-best', 'p-m-best']);
+  });
+});
+
+describe('cleanScan', () => {
+  const now = new Date('2026-11-21T10:00:00Z');
+  const sent = {
+    source: 'on_device',
+    captured_at: '2026-11-21T09:10:00Z',
+    findings: [
+      { feature: 'redness', level: 'moderate', score: 62.4 },
+      { feature: 'redness', level: 'high', score: 90 },
+      { feature: 'shine', level: 'none', score: 250 },
+      { feature: 'acne', level: 'high', score: 50 },
+      { feature: 'blemishes', level: 'unavailable' },
+    ],
+    photo_issues: ['face-turned', 'face-turned', 'DROP TABLE'],
+    photo: 'data:image/jpeg;base64,...',
+  };
+
+  it('keeps the known findings once each, rounds and caps scores, and drops anything else', () => {
+    expect(cleanScan(sent, now)).toEqual({
+      source: 'on_device',
+      captured_at: '2026-11-21T09:10:00.000Z',
+      findings: [
+        { feature: 'redness', level: 'moderate', score: 62 },
+        { feature: 'shine', level: 'none', score: 100 },
+      ],
+      photo_issues: ['face-turned'],
+    });
+  });
+
+  it('is null without usable findings, a valid date, or with a date in the future', () => {
+    expect(cleanScan(undefined, now)).toBeNull();
+    expect(cleanScan({ ...sent, findings: [] }, now)).toBeNull();
+    expect(cleanScan({ ...sent, captured_at: 'yesterday' }, now)).toBeNull();
+    expect(cleanScan({ ...sent, captured_at: '2026-11-22T10:00:00Z' }, now)).toBeNull();
+  });
+
+  it('goes into the AI request as one level per feature (v1.1), only when all four were read', () => {
+    const full = cleanScan(
+      {
+        captured_at: '2026-11-21T09:10:00Z',
+        findings: [
+          { feature: 'redness', level: 'none', score: 3 },
+          { feature: 'shine', level: 'mild', score: 30 },
+          { feature: 'darkCircles', level: 'none', score: 5 },
+          { feature: 'blemishes', level: 'moderate', score: 55 },
+        ],
+      },
+      now,
+    );
+    expect(toAiRequest(profile(), 'US', 'USD', 'r1', full).scan).toEqual({
+      redness: 'none',
+      shine: 'mild',
+      darkCircles: 'none',
+      blemishes: 'moderate',
+    });
+    // Two of four read: no scan rather than claiming "none" for the others.
+    expect(toAiRequest(profile(), 'US', 'USD', 'r1', cleanScan(sent, now)).scan).toBeNull();
+    expect(toAiRequest(profile(), 'US', 'USD', 'r1').scan).toBeNull();
+    expect(toAiRequest(profile(), 'US', 'USD', 'r1').schema_version).toBe('1.1');
   });
 });

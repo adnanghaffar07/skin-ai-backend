@@ -1,4 +1,4 @@
-import { AI_SCHEMA_VERSION, type AiProduct, type AiRecommendRequest } from '../ai/ai.types.js';
+import { AI_SCHEMA_VERSION, type AiProduct, type AiRecommendRequest, type AiScan, type AiScanLevels } from '../ai/ai.types.js';
 import { productKey, type SavedProduct } from '../ai/product-intake.repository.js';
 import { ceilingFor, fitToBudget } from './budget.js';
 import { budgetLimitations, CATEGORY_ORDER, ranked, wantedCategories, type Plan, type RankedProduct } from './ranking.js';
@@ -8,7 +8,64 @@ import type { ProfileContext } from './recommendations.repository.js';
 export const AI_MAX_PRODUCTS = 12;
 
 /** The person's answers as the AI service expects them. No name, email, birth date or ids. */
-export function toAiRequest(profile: ProfileContext, market: string, currency: string, requestId: string): AiRecommendRequest {
+const SCAN_FEATURES = ['redness', 'shine', 'darkCircles', 'blemishes'];
+const SCAN_LEVELS = ['none', 'mild', 'moderate', 'high'];
+const PHOTO_ISSUES = /^[a-z][a-z-]{1,30}$/;
+
+/**
+ * The scan findings the app sent, checked and cut down to the contract's shape; anything else is dropped. Null when
+ * nothing usable was sent, so the AI service treats the plan as questionnaire only.
+ */
+export function cleanScan(raw: unknown, now: Date = new Date()): AiScan | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const input = raw as Record<string, unknown>;
+  const captured = typeof input.captured_at === 'string' ? new Date(input.captured_at) : null;
+  if (!captured || Number.isNaN(captured.getTime()) || captured.getTime() > now.getTime() + 5 * 60 * 1000) {
+    return null;
+  }
+  const findings = (Array.isArray(input.findings) ? input.findings : [])
+    .filter((f): f is Record<string, unknown> => !!f && typeof f === 'object')
+    .filter(f => SCAN_FEATURES.includes(f.feature as string) && SCAN_LEVELS.includes(f.level as string))
+    .map(f => ({
+      feature: f.feature as string,
+      level: f.level as string,
+      score: typeof f.score === 'number' && Number.isFinite(f.score) ? Math.max(0, Math.min(100, Math.round(f.score))) : null,
+    }));
+  const unique = findings.filter((f, i) => findings.findIndex(o => o.feature === f.feature) === i);
+  if (!unique.length) {
+    return null;
+  }
+  const issues = (Array.isArray(input.photo_issues) ? input.photo_issues : []).filter(
+    (issue): issue is string => typeof issue === 'string' && PHOTO_ISSUES.test(issue),
+  );
+  return { source: 'on_device', captured_at: captured.toISOString(), findings: unique, photo_issues: [...new Set(issues)].slice(0, 10) };
+}
+
+/**
+ * The scan in the AI service's shape: { redness, shine, darkCircles, blemishes } with one level each. Null unless all
+ * four were read, so a partial scan never reads as "none found" for the missing ones.
+ */
+export function scanLevels(scan: AiScan | null): AiScanLevels | null {
+  if (!scan) {
+    return null;
+  }
+  const level = (feature: string) => scan.findings.find(f => f.feature === feature)?.level;
+  const redness = level('redness');
+  const shine = level('shine');
+  const darkCircles = level('darkCircles');
+  const blemishes = level('blemishes');
+  return redness && shine && darkCircles && blemishes ? { redness, shine, darkCircles, blemishes } : null;
+}
+
+export function toAiRequest(
+  profile: ProfileContext,
+  market: string,
+  currency: string,
+  requestId: string,
+  scan: AiScan | null = null,
+): AiRecommendRequest {
   return {
     schema_version: AI_SCHEMA_VERSION,
     request_id: requestId,
@@ -28,7 +85,7 @@ export function toAiRequest(profile: ProfileContext, market: string, currency: s
       monthly_budget: profile.budget_band,
       product_interests: profile.categories,
     },
-    scan: null,
+    scan: scanLevels(scan),
     limits: { max_products: AI_MAX_PRODUCTS, categories: wantedCategories(profile.categories) },
   };
 }

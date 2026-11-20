@@ -67,6 +67,13 @@ describe('HttpAiRecommender', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('does not retry when the service found no products (502), so Clara falls back at once', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json(502, { code: 'UPSTREAM_SEARCH_FAILED' }));
+    const ai = new HttpAiRecommender('https://ai.example.com', 'k', 1000, fetchMock);
+    await expect(ai.recommend(request)).rejects.toMatchObject({ code: 'AI_HTTP_502' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('does not retry a refused key', async () => {
     const fetchMock = vi.fn().mockResolvedValue(json(401, { code: 'UNAUTHORIZED' }));
     const ai = new HttpAiRecommender('https://ai.example.com', 'k', 1000, fetchMock);

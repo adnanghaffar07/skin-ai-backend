@@ -70,6 +70,14 @@ describe('parseAiResponse', () => {
     expect(response.products[0].price.amount).toBe('100.00');
   });
 
+  it('reads the summary and limits from analysis (v1.1)', () => {
+    const { response } = parseAiResponse(
+      body([], { schema_version: '1.1', summary: undefined, limitations: ['Prices checked today.'], analysis: { summary: 'Dry, uneven tone.', limitations: ['No photo.'] } }),
+      'USD',
+    );
+    expect(response).toMatchObject({ schema_version: '1.1', summary: 'Dry, uneven tone.', limitations: ['Prices checked today.', 'No photo.'] });
+  });
+
   it('assumes low confidence when none is given', () => {
     expect(parseAiResponse(body([], { confidence: 'certain' }), 'USD', now).response.confidence).toBe('low');
   });

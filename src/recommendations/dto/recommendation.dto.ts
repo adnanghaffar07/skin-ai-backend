@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsOptional, IsUUID, Matches } from 'class-validator';
+import { IsObject, IsOptional, IsUUID, Matches } from 'class-validator';
 
 export class CreateRecommendationDto {
   @ApiProperty({ example: '4f8c1d2a-6b7e-4a91-9c0d-11e2f3a4b5c6' })
@@ -12,6 +12,21 @@ export class CreateRecommendationDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.toUpperCase() : value))
   @Matches(/^[A-Z]{2}$/)
   market_code?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'What the phone read from the newest face scan (findings only, never the photo). Passed to the AI service; invalid parts are dropped.',
+    example: {
+      source: 'on_device',
+      captured_at: '2026-11-21T09:10:00Z',
+      findings: [{ feature: 'redness', level: 'moderate', score: 62 }],
+      photo_issues: [],
+    },
+  })
+  @IsOptional()
+  @IsObject()
+  scan?: Record<string, unknown>;
 }
 
 export class RecommendedProductDto {

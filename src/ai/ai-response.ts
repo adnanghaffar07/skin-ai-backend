@@ -161,8 +161,14 @@ export function parseAiResponse(
       schema_version: schemaVersion,
       model_version: text(body.model_version, 64),
       confidence: CONFIDENCE.includes(body.confidence as AiConfidence) ? (body.confidence as AiConfidence) : 'low',
-      summary: text(body.summary, 300),
-      limitations: strings(body.limitations, 300).slice(0, 10),
+      // v1.1 puts the summary and the analysis' own limits inside `analysis`.
+      summary: text(body.summary, 300) ?? (isObject(body.analysis) ? text(body.analysis.summary, 300) : null),
+      limitations: [
+        ...new Set([
+          ...strings(body.limitations, 300),
+          ...(isObject(body.analysis) ? strings(body.analysis.limitations, 300) : []),
+        ]),
+      ].slice(0, 10),
       products: kept,
     },
     dropped,

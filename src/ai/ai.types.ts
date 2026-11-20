@@ -1,6 +1,6 @@
 /** The AI service contract, v1 (docs/AI_SERVICE_CONTRACT.md). */
 
-export const AI_SCHEMA_VERSION = '1.0';
+export const AI_SCHEMA_VERSION = '1.1';
 
 export const AI_CATEGORIES = ['cleansers', 'serums', 'moisturizers', 'sunscreens', 'exfoliants'] as const;
 export type AiCategory = (typeof AI_CATEGORIES)[number];
@@ -20,14 +20,25 @@ export interface AiProfile {
   product_interests: string[];
 }
 
+/** What the phone read from a face scan (contract section 6, option 1). The photo itself never leaves the phone. */
+export interface AiScan {
+  source: 'on_device';
+  captured_at: string;
+  findings: { feature: string; level: string; score: number | null }[];
+  photo_issues: string[];
+}
+
+/** The scan as the AI service reads it (handover v1.1): one level per feature, sent only when all four were read. */
+export type AiScanLevels = Record<'redness' | 'shine' | 'darkCircles' | 'blemishes', string>;
+
 export interface AiRecommendRequest {
   schema_version: string;
   request_id: string;
   market: string;
   currency: string;
   profile: AiProfile;
-  /** Always null in v1: see section 6 of the contract. */
-  scan: null;
+  /** The newest face scan's levels when the app sent all four, otherwise null (questionnaire only). */
+  scan: AiScanLevels | null;
   limits: { max_products: number; categories: string[] };
 }
 

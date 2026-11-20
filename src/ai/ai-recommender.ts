@@ -44,8 +44,11 @@ export class HttpAiRecommender extends AiRecommender {
   async recommend(request: AiRecommendRequest): Promise<AiResult> {
     const started = Date.now();
     let response = await this.send(request);
-    // One retry, only after a network failure or a 5xx; the same request_id lets the service answer it once.
-    if (response === null || response.status >= 500) {
+    // One retry, only when a retry can help: the connection failed quickly, or the service was briefly unavailable
+    // (503/504). A 502 means it found no products and a 500 that it is not set up, so Clara's own picks are used
+    // straight away instead of making the person wait twice. The same request_id lets the service answer it once.
+    const failedFast = response === null && Date.now() - started < 5000;
+    if (failedFast || response?.status === 503 || response?.status === 504) {
       response = await this.send(request);
     }
     if (response === null) {

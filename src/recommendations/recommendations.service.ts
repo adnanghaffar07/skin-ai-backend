@@ -11,7 +11,8 @@ import type {
   CreateRecommendationDto,
   RecommendationDto,
 } from './dto/recommendation.dto.js';
-import { planFromAi, routineProducts, toAiRequest } from './ai-plan.js';
+import type { AiScan } from '../ai/ai.types.js';
+import { cleanScan, planFromAi, routineProducts, toAiRequest } from './ai-plan.js';
 import { buildPlan, RULE_VERSION, type RankedProduct } from './ranking.js';
 import {
   RecommendationsRepository,
@@ -112,7 +113,7 @@ export class RecommendationsService {
         'Pass market_code or set a market on the profile.',
       );
     }
-    const built = await this.build(profile, market);
+    const built = await this.build(profile, market, cleanScan(body.scan));
     const saved = await this.repo.save({
       userId: user.id,
       submissionId: body.submission_id,
@@ -141,7 +142,7 @@ export class RecommendationsService {
    * The AI service's picks when it is configured and answers with something usable; otherwise Clara's own rules over
    * the products already saved, with a limitation saying why.
    */
-  private async build(profile: ProfileContext, market: string): Promise<BuiltPlan> {
+  private async build(profile: ProfileContext, market: string, scan: AiScan | null = null): Promise<BuiltPlan> {
     const rules = async (reasons: string[]): Promise<BuiltPlan> => {
       const plan = buildPlan(await this.repo.candidates(market), profile);
       return {
@@ -157,7 +158,7 @@ export class RecommendationsService {
     }
     const provider = this.ai.provider;
     try {
-      const result = await this.ai.recommend(toAiRequest(profile, market, currency, randomUUID()));
+      const result = await this.ai.recommend(toAiRequest(profile, market, currency, randomUUID(), scan));
       const found = result.response.products;
       const saved = await this.intake.save(found, market, this.markupBp, provider === 'stub' ? 'stub' : 'ai');
       const plan = planFromAi(found, saved, profile);
