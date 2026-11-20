@@ -10,6 +10,12 @@ import {
 /** The private bucket made by the scan_photo_storage migration. */
 export const SCAN_PHOTOS_BUCKET = 'scan-photos';
 
+/** Where the secret key comes from: a fixed value (SUPABASE_SECRET_KEY), or a lookup such as Supabase Vault. */
+export type SecretKeySource = string | (() => Promise<string | null>);
+
+/** After a lookup finds no key, wait this long before asking again. */
+const MISSING_KEY_RETRY_MS = 60_000;
+
 /**
  * Supabase Storage, through its REST API with the project's secret key. The bucket has no policies, so nothing but
  * this key can read or write it; the phone uploads through a signed link that works for one object only.
@@ -19,14 +25,41 @@ export class SupabaseStorage extends ObjectStorage {
   readonly provider = 'supabase';
   readonly bucket = SCAN_PHOTOS_BUCKET;
   private readonly base: string;
+  private key: string | null = null;
+  private missingUntil = 0;
 
   constructor(
     supabaseUrl: string,
-    private readonly secretKey: string,
+    private readonly keySource: SecretKeySource,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {
     super();
     this.base = `${supabaseUrl.replace(/\/+$/, '')}/storage/v1`;
+  }
+
+  /** The key, looked up once and then kept. Without one, photo calls answer 503 as before storage was set up. */
+  private async secretKey(): Promise<string> {
+    if (this.key) {
+      return this.key;
+    }
+    if (typeof this.keySource === 'string') {
+      this.key = this.keySource;
+      return this.key;
+    }
+    if (Date.now() >= this.missingUntil) {
+      let found: string | null = null;
+      try {
+        found = await this.keySource();
+      } catch {
+        found = null;
+      }
+      if (found && /^(sb_secret_|eyJ)/.test(found.trim())) {
+        this.key = found.trim();
+        return this.key;
+      }
+      this.missingUntil = Date.now() + MISSING_KEY_RETRY_MS;
+    }
+    throw this.unavailable('Photo storage is not configured.');
   }
 
   async createSignedUpload(request: SignedUploadRequest): Promise<SignedUpload> {
@@ -75,16 +108,21 @@ export class SupabaseStorage extends ObjectStorage {
   }
 
   private async call(path: string, init: RequestInit): Promise<Response> {
-    const headers: Record<string, string> = { apikey: this.secretKey, ...(init.headers as Record<string, string>) };
+    const key = await this.secretKey();
+    const headers: Record<string, string> = { apikey: key, ...(init.headers as Record<string, string>) };
     // The older service_role key is a JWT and also goes in Authorization; the newer sb_secret_ keys go in apikey only.
-    if (this.secretKey.startsWith('eyJ')) {
-      headers.Authorization = `Bearer ${this.secretKey}`;
+    if (key.startsWith('eyJ')) {
+      headers.Authorization = `Bearer ${key}`;
     }
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.base}${path}`, { ...init, headers });
     } catch {
       throw this.unavailable('Photo storage could not be reached.');
+    }
+    if ((response.status === 401 || response.status === 403) && typeof this.keySource !== 'string') {
+      // A key from Vault that storage refuses was probably replaced there: look it up again next time.
+      this.key = null;
     }
     if (!response.ok) {
       throw this.unavailable(`Photo storage answered ${response.status}.`);

@@ -44,4 +44,40 @@ describe('SupabaseStorage', () => {
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ prefixes: ['scans/u/s/n.jpg'] });
     await expect(storage.delete('scans/u/s/n.jpg')).rejects.toMatchObject({ status: 503 });
   });
+
+  it('reads the key from a lookup (Vault) once and keeps it', async () => {
+    const lookup = vi.fn().mockResolvedValue('sb_secret_vault');
+    const fetchImpl = vi.fn().mockResolvedValue(ok([]));
+    const storage = new SupabaseStorage('https://p.supabase.co', lookup, fetchImpl);
+    await storage.head('scans/u/s/a.jpg');
+    await storage.head('scans/u/s/b.jpg');
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[1][1].headers).toMatchObject({ apikey: 'sb_secret_vault' });
+  });
+
+  it('answers 503 without calling storage when the lookup finds no key, and does not ask again straight away', async () => {
+    const lookup = vi.fn().mockResolvedValue(null);
+    const fetchImpl = vi.fn();
+    const storage = new SupabaseStorage('https://p.supabase.co', lookup, fetchImpl);
+    await expect(storage.head('scans/u/s/a.jpg')).rejects.toMatchObject({ status: 503 });
+    await expect(storage.head('scans/u/s/a.jpg')).rejects.toMatchObject({ status: 503 });
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('ignores a value that is not a Supabase secret key, and a lookup that fails', async () => {
+    const storage = new SupabaseStorage('https://p.supabase.co', vi.fn().mockResolvedValue('not-a-key'), vi.fn());
+    await expect(storage.head('scans/u/s/a.jpg')).rejects.toMatchObject({ status: 503 });
+    const failing = new SupabaseStorage('https://p.supabase.co', vi.fn().mockRejectedValue(new Error('db down')), vi.fn());
+    await expect(failing.head('scans/u/s/a.jpg')).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('looks the key up again after storage refuses it', async () => {
+    const lookup = vi.fn().mockResolvedValueOnce('sb_secret_old').mockResolvedValueOnce('sb_secret_new');
+    const fetchImpl = vi.fn().mockResolvedValueOnce({ ok: false, status: 403 } as Response).mockResolvedValueOnce(ok([]));
+    const storage = new SupabaseStorage('https://p.supabase.co', lookup, fetchImpl);
+    await expect(storage.head('scans/u/s/a.jpg')).rejects.toMatchObject({ status: 503 });
+    await storage.head('scans/u/s/a.jpg');
+    expect(fetchImpl.mock.calls[1][1].headers).toMatchObject({ apikey: 'sb_secret_new' });
+  });
 });
