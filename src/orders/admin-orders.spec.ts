@@ -4,6 +4,7 @@ import { AdminGuard } from '../auth/admin.guard.js';
 import type { DatabaseService } from '../database/database.service.js';
 import { statusChangeProblem } from './admin-order-rules.js';
 import { AdminOrdersService } from './admin-orders.service.js';
+import type { OrderEmailsService } from './order-emails.js';
 import type { AdminItemRow, OrderRow, OrdersRepository } from './orders.repository.js';
 
 const admin = { id: 'admin1', email: 'team@clara.test', displayName: null };
@@ -62,7 +63,12 @@ function build(repo: Partial<Record<keyof OrdersRepository, unknown>> = {}) {
     changeStatus: vi.fn().mockResolvedValue(true),
     ...repo,
   };
-  return { service: new AdminOrdersService(repository as unknown as OrdersRepository), repository };
+  const emails = { send: vi.fn().mockResolvedValue('sent'), list: vi.fn().mockResolvedValue([]) };
+  return {
+    service: new AdminOrdersService(repository as unknown as OrdersRepository, emails as unknown as OrderEmailsService),
+    repository,
+    emails,
+  };
 }
 
 describe('statusChangeProblem', () => {
@@ -150,5 +156,24 @@ describe('AdminOrdersService', () => {
     expect(repository.changeStatus).not.toHaveBeenCalled();
     const raced = build({ changeStatus: vi.fn().mockResolvedValue(false) });
     await expect(raced.service.changeStatus(admin, 'o1', { status: 'ordered_from_store' })).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+describe('AdminOrdersService customer emails', () => {
+  it('emails the customer when an order ships, but not when the team buys it from the store', async () => {
+    const shipped = build({ adminFind: vi.fn().mockResolvedValue(order({ status: 'ordered_from_store' })) });
+    await shipped.service.changeStatus(admin, 'o1', { status: 'shipped', carrier: 'USPS', tracking_number: '9400' });
+    expect(shipped.emails.send).toHaveBeenCalledWith('o1', 'shipped');
+
+    const bought = build();
+    await bought.service.changeStatus(admin, 'o1', { status: 'ordered_from_store' });
+    expect(bought.emails.send).not.toHaveBeenCalled();
+  });
+
+  it('resends only emails for steps the order has reached', async () => {
+    const { service, emails } = build();
+    await service.resendEmail('o1', 'paid');
+    expect(emails.send).toHaveBeenCalledWith('o1', 'paid', true);
+    await expect(service.resendEmail('o1', 'shipped')).rejects.toMatchObject({ status: 409 });
   });
 });

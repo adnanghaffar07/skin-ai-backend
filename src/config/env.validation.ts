@@ -1,28 +1,22 @@
 import 'reflect-metadata';
 import { plainToInstance, Type } from 'class-transformer';
-import {
-  IsIn,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsUrl,
-  Matches,
-  Max,
-  Min,
-  validateSync,
-} from 'class-validator';
+import { IsEmail, IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, Max, Min, validateSync } from 'class-validator';
 
 export const NODE_ENVS = ['development', 'test', 'production'] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
 
 export const AI_SERVICE_MODES = ['off', 'stub', 'http'] as const;
 export const PAYMENTS_MODES = ['off', 'stripe'] as const;
+export const EMAIL_MODES = ['off', 'resend'] as const;
+export type EmailMode = (typeof EMAIL_MODES)[number];
 export type PaymentsMode = (typeof PAYMENTS_MODES)[number];
 export type AiServiceMode = (typeof AI_SERVICE_MODES)[number];
 
 export const DEFAULT_SUPABASE_URL =
   'https://awhulfitatettoqllejm.supabase.co';
 export const DEFAULT_PUBLIC_BASE_URL = 'https://clara-skin-api.vercel.app';
+/** Supabase's publishable key is meant to be public (the app ships it too); the password-reset page needs it. */
+export const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_pu3AXxvoauy6gdniZbnxkg_jg9lKEBq';
 
 export class EnvironmentVariables {
   @IsIn(NODE_ENVS)
@@ -36,6 +30,10 @@ export class EnvironmentVariables {
 
   @IsUrl({ require_protocol: true, protocols: ['https'] })
   SUPABASE_URL!: string;
+
+  @IsString()
+  @Matches(/^sb_publishable_/)
+  SUPABASE_PUBLISHABLE_KEY!: string;
 
   @IsOptional()
   @IsString()
@@ -106,6 +104,30 @@ export class EnvironmentVariables {
   /** Public address of this API, used for the pages Stripe sends the customer back to. */
   @IsUrl({ require_protocol: true, protocols: ['https', 'http'], require_tld: false })
   PUBLIC_BASE_URL!: string;
+
+  /** resend: emails go out through Resend. off: nothing is sent (each email is only logged). */
+  @IsIn(EMAIL_MODES)
+  EMAIL_MODE!: EmailMode;
+
+  /** Resend API key (re_...) with sending access. */
+  @IsOptional()
+  @IsString()
+  RESEND_API_KEY?: string;
+
+  /** Sender, on a domain verified in Resend, e.g. "Clara <hello@example.com>". */
+  @IsOptional()
+  @IsString()
+  EMAIL_FROM?: string;
+
+  /** Where customer replies go, e.g. the team inbox. */
+  @IsOptional()
+  @IsEmail()
+  EMAIL_REPLY_TO?: string;
+
+  /** Secret of Supabase's Send Email Hook (v1,whsec_...), so only Supabase can ask this API to send sign-in emails. */
+  @IsOptional()
+  @IsString()
+  SUPABASE_EMAIL_HOOK_SECRET?: string;
 }
 
 export function validateEnv(
@@ -117,6 +139,7 @@ export function validateEnv(
       NODE_ENV: config.NODE_ENV ?? 'development',
       PORT: config.PORT ?? 3000,
       SUPABASE_URL: config.SUPABASE_URL ?? DEFAULT_SUPABASE_URL,
+      SUPABASE_PUBLISHABLE_KEY: config.SUPABASE_PUBLISHABLE_KEY || DEFAULT_SUPABASE_PUBLISHABLE_KEY,
       DATABASE_URL: config.DATABASE_URL || undefined,
       DATABASE_SSL_CA: config.DATABASE_SSL_CA || undefined,
       CORS_ORIGINS: config.CORS_ORIGINS || undefined,
@@ -130,6 +153,11 @@ export function validateEnv(
       STRIPE_SECRET_KEY: config.STRIPE_SECRET_KEY || undefined,
       STRIPE_WEBHOOK_SECRET: config.STRIPE_WEBHOOK_SECRET || undefined,
       PUBLIC_BASE_URL: config.PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL,
+      EMAIL_MODE: config.EMAIL_MODE || (config.RESEND_API_KEY ? 'resend' : 'off'),
+      RESEND_API_KEY: config.RESEND_API_KEY || undefined,
+      EMAIL_FROM: config.EMAIL_FROM || undefined,
+      EMAIL_REPLY_TO: config.EMAIL_REPLY_TO || undefined,
+      SUPABASE_EMAIL_HOOK_SECRET: config.SUPABASE_EMAIL_HOOK_SECRET || undefined,
     },
     { enableImplicitConversion: true },
   );
@@ -154,6 +182,17 @@ export function validateEnv(
     throw new Error(
       'Environment validation failed: PAYMENTS_MODE=stripe needs STRIPE_SECRET_KEY (sk_...) and STRIPE_WEBHOOK_SECRET (whsec_...).',
     );
+  }
+  if (
+    validated.EMAIL_MODE === 'resend' &&
+    (!validated.RESEND_API_KEY?.startsWith('re_') || !/^(.+<)?[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+>?$/.test(validated.EMAIL_FROM ?? ''))
+  ) {
+    throw new Error(
+      'Environment validation failed: EMAIL_MODE=resend needs RESEND_API_KEY (re_...) and EMAIL_FROM (e.g. "Clara <hello@example.com>").',
+    );
+  }
+  if (validated.SUPABASE_EMAIL_HOOK_SECRET && !validated.SUPABASE_EMAIL_HOOK_SECRET.startsWith('v1,whsec_')) {
+    throw new Error('Environment validation failed: SUPABASE_EMAIL_HOOK_SECRET must be the v1,whsec_... value Supabase shows.');
   }
   return validated;
 }

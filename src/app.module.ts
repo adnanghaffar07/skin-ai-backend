@@ -15,6 +15,10 @@ import { PreferencesModule } from './preferences/preferences.module.js';
 import { ScansModule } from './scans/scans.module.js';
 import { StorageModule } from './storage/storage.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
+import { AnalyticsModule } from './analytics/analytics.js';
+import { EmailModule } from './email/email.module.js';
+import { AuthPagesModule } from './auth-pages/auth-pages.controller.js';
+import { DiaryModule } from './diary/diary.module.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { RecommendationsModule } from './recommendations/recommendations.module.js';
 import { RoutinesModule } from './routines/routines.module.js';
@@ -42,6 +46,10 @@ import { UsersModule } from './users/users.module.js';
     CatalogModule,
     RecommendationsModule,
     OrdersModule,
+    DiaryModule,
+    AuthPagesModule,
+    AnalyticsModule,
+    EmailModule,
     RoutinesModule,
     DashboardModule,
   ],

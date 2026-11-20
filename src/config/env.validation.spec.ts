@@ -1,4 +1,4 @@
-import { DEFAULT_SUPABASE_URL, validateEnv } from './env.validation.js';
+import { DEFAULT_SUPABASE_PUBLISHABLE_KEY, DEFAULT_SUPABASE_URL, validateEnv } from './env.validation.js';
 
 describe('validateEnv', () => {
   it('defaults NODE_ENV and PORT when they are absent', () => {
@@ -6,6 +6,7 @@ describe('validateEnv', () => {
       NODE_ENV: 'development',
       PORT: 3000,
       SUPABASE_URL: DEFAULT_SUPABASE_URL,
+      SUPABASE_PUBLISHABLE_KEY: DEFAULT_SUPABASE_PUBLISHABLE_KEY,
       DATABASE_URL: undefined,
       DATABASE_SSL_CA: undefined,
       CORS_ORIGINS: undefined,
@@ -19,6 +20,11 @@ describe('validateEnv', () => {
       STRIPE_SECRET_KEY: undefined,
       STRIPE_WEBHOOK_SECRET: undefined,
       PUBLIC_BASE_URL: 'https://clara-skin-api.vercel.app',
+      EMAIL_MODE: 'off',
+      RESEND_API_KEY: undefined,
+      EMAIL_FROM: undefined,
+      EMAIL_REPLY_TO: undefined,
+      SUPABASE_EMAIL_HOOK_SECRET: undefined,
     });
   });
 
@@ -27,6 +33,7 @@ describe('validateEnv', () => {
       NODE_ENV: 'test',
       PORT: 4100,
       SUPABASE_URL: DEFAULT_SUPABASE_URL,
+      SUPABASE_PUBLISHABLE_KEY: DEFAULT_SUPABASE_PUBLISHABLE_KEY,
       DATABASE_URL: undefined,
       DATABASE_SSL_CA: undefined,
       CORS_ORIGINS: undefined,
@@ -40,6 +47,11 @@ describe('validateEnv', () => {
       STRIPE_SECRET_KEY: undefined,
       STRIPE_WEBHOOK_SECRET: undefined,
       PUBLIC_BASE_URL: 'https://clara-skin-api.vercel.app',
+      EMAIL_MODE: 'off',
+      RESEND_API_KEY: undefined,
+      EMAIL_FROM: undefined,
+      EMAIL_REPLY_TO: undefined,
+      SUPABASE_EMAIL_HOOK_SECRET: undefined,
     });
   });
 
@@ -94,5 +106,13 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ PAYMENTS_MODE: 'stripe', STRIPE_WEBHOOK_SECRET: 'whsec_x' })).toThrow(/STRIPE_SECRET_KEY/);
     expect(validateEnv({ STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET: 'whsec_x' }).PAYMENTS_MODE).toBe('stripe');
     expect(validateEnv({ PAYMENTS_MODE: 'off', STRIPE_SECRET_KEY: 'sk_test_x' }).PAYMENTS_MODE).toBe('off');
+  });
+
+  it('sends email through Resend only with a key and a sender', () => {
+    expect(validateEnv({}).EMAIL_MODE).toBe('off');
+    expect(() => validateEnv({ RESEND_API_KEY: 're_x' })).toThrow(/EMAIL_FROM/);
+    expect(() => validateEnv({ RESEND_API_KEY: 'x', EMAIL_FROM: 'hello@clara.test' })).toThrow(/RESEND_API_KEY/);
+    expect(validateEnv({ RESEND_API_KEY: 're_x', EMAIL_FROM: 'Clara <hello@clara.test>' }).EMAIL_MODE).toBe('resend');
+    expect(() => validateEnv({ SUPABASE_EMAIL_HOOK_SECRET: 'whsec_x' })).toThrow(/v1,whsec_/);
   });
 });

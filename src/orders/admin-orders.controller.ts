@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseEnumPipe, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '../auth/admin.guard.js';
 import type { AuthenticatedUser } from '../auth/authenticated-user.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import { AdminOrdersService } from './admin-orders.service.js';
+import { ORDER_EMAIL_KINDS, type OrderEmailKind } from './order-emails.js';
 import {
   AdminOrderDetailDto,
   AdminOrderListDto,
@@ -49,5 +50,19 @@ export class AdminOrdersController {
     @Body() body: ChangeOrderStatusDto,
   ): Promise<AdminOrderDetailDto> {
     return this.orders.changeStatus(admin, id, body);
+  }
+
+  @Post(':id/emails/:kind')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Send a customer email again',
+    description: 'kind is paid, shipped, delivered or refunded, and the order must have reached that step. The order detail lists every email and whether Resend accepted it.',
+  })
+  @ApiOkResponse({ type: AdminOrderDetailDto })
+  resendEmail(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('kind', new ParseEnumPipe(Object.fromEntries(ORDER_EMAIL_KINDS.map((kind) => [kind, kind])))) kind: string,
+  ): Promise<AdminOrderDetailDto> {
+    return this.orders.resendEmail(id, kind as OrderEmailKind);
   }
 }

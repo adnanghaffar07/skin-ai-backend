@@ -4,6 +4,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { UsersService } from '../users/users.service.js';
 import type { CreateOrderDto } from './dto/order.dto.js';
 import type { OrderableProduct, OrderRow, OrdersRepository } from './orders.repository.js';
+import type { OrderEmailsService } from './order-emails.js';
 import { OrdersService } from './orders.service.js';
 import type { StripeClient } from './stripe.js';
 
@@ -85,13 +86,15 @@ function build(repo: Partial<Record<keyof OrdersRepository, unknown>> = {}, stri
     ? { createCheckoutSession: vi.fn().mockResolvedValue({ id: 'cs_1', url: 'https://checkout.stripe.com/c/cs_1' }), ...stripe }
     : null;
   const config = { get: (key: string) => ({ STRIPE_WEBHOOK_SECRET: SECRET, PUBLIC_BASE_URL: 'https://api.test' })[key] };
+  const emails = { send: vi.fn().mockResolvedValue('sent') };
   const service = new OrdersService(
     { getMe: vi.fn().mockResolvedValue({}) } as unknown as UsersService,
     repository as unknown as OrdersRepository,
     config as unknown as ConfigService,
+    emails as unknown as OrderEmailsService,
     client as unknown as StripeClient | null,
   );
-  return { service, repository, client };
+  return { service, repository, client, emails };
 }
 
 describe('OrdersService.create', () => {
@@ -159,17 +162,19 @@ describe('OrdersService.handleStripeEvent', () => {
   });
 
   it('marks the order paid when the amount matches', async () => {
-    const { service, repository } = build();
+    const { service, repository, emails } = build();
     const raw = event('checkout.session.completed', { payment_status: 'paid', amount_total: 5686, currency: 'usd', payment_intent: 'pi_1' });
     await service.handleStripeEvent(raw, signed(raw));
     expect(repository.markPaid).toHaveBeenCalledWith('o1', 'cs_1', 'pi_1');
+    expect(emails.send).toHaveBeenCalledWith('o1', 'paid');
   });
 
   it('does not mark the order paid when the amount differs', async () => {
-    const { service, repository } = build();
+    const { service, repository, emails } = build();
     const raw = event('checkout.session.completed', { payment_status: 'paid', amount_total: 100, currency: 'usd' });
     await service.handleStripeEvent(raw, signed(raw));
     expect(repository.markPaid).not.toHaveBeenCalled();
+    expect(emails.send).not.toHaveBeenCalled();
   });
 
   it('waits when the payment is not settled yet', async () => {

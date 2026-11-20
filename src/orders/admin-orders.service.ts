@@ -11,6 +11,7 @@ import {
   AdminOrdersQueryDto,
   ChangeOrderStatusDto,
 } from './dto/admin-order.dto.js';
+import { ORDER_EMAIL_KINDS, OrderEmailKind, OrderEmailsService } from './order-emails.js';
 import { AdminItemRow, OrderRow, OrdersRepository } from './orders.repository.js';
 
 type Plain<T> = { [K in keyof T]: T[K] };
@@ -19,7 +20,10 @@ const iso = (value: Date | null) => (value ? value.toISOString() : null);
 /** What Clara's team needs to fulfil orders: what to buy where, and moving each order along. */
 @Injectable()
 export class AdminOrdersService {
-  constructor(private readonly repo: OrdersRepository) {}
+  constructor(
+    private readonly repo: OrdersRepository,
+    private readonly orderEmails: OrderEmailsService,
+  ) {}
 
   async list(query: AdminOrdersQueryDto): Promise<AdminOrderListDto> {
     const limit = query.limit ?? 50;
@@ -34,9 +38,17 @@ export class AdminOrdersService {
       throw new ApiException(404, ErrorCode.NOT_FOUND, 'Order not found.');
     }
     const [presented] = await this.present([order]);
-    const history = await this.repo.events(orderId);
+    const [history, emails] = await Promise.all([this.repo.events(orderId), this.orderEmails.list(orderId)]);
     return {
       ...presented!,
+      emails: emails.map((email) => ({
+        kind: email.kind,
+        status: email.status,
+        to: email.recipient,
+        error: email.error,
+        attempts: email.attempts,
+        at: email.updated_at.toISOString(),
+      })),
       history: history.map((event) => ({
         from_status: event.from_status,
         to_status: event.to_status,
@@ -61,6 +73,24 @@ export class AdminOrdersService {
     if (!changed) {
       throw new ApiException(409, ErrorCode.CONFLICT, 'Someone else changed this order just now. Reload it and try again.');
     }
+    // The customer hears about the steps that matter to them; buying from the store is behind the scenes.
+    if ((ORDER_EMAIL_KINDS as readonly string[]).includes(body.status)) {
+      await this.orderEmails.send(orderId, body.status as OrderEmailKind);
+    }
+    return this.get(orderId);
+  }
+
+  /** Sends a customer email again (for example after fixing the Resend setup, or when the customer did not get it). */
+  async resendEmail(orderId: string, kind: OrderEmailKind): Promise<AdminOrderDetailDto> {
+    const order = await this.repo.adminFind(orderId);
+    if (!order) {
+      throw new ApiException(404, ErrorCode.NOT_FOUND, 'Order not found.');
+    }
+    const reached = { paid: order.paid_at, shipped: order.shipped_at, delivered: order.delivered_at, refunded: order.refunded_at }[kind];
+    if (!reached) {
+      throw new ApiException(409, ErrorCode.CONFLICT, `This order has not been ${kind} yet, so there is no ${kind} email to send.`);
+    }
+    await this.orderEmails.send(orderId, kind, true);
     return this.get(orderId);
   }
 

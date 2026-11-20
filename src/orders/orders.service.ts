@@ -14,6 +14,7 @@ import {
   SHIPPING_OPTIONS,
   ShippingOption,
 } from './dto/order.dto.js';
+import { OrderEmailsService } from './order-emails.js';
 import { OrderItemRow, OrderRow, OrdersRepository } from './orders.repository.js';
 import { StripeClient, StripeError, StripeEvent, verifyStripeSignature } from './stripe.js';
 
@@ -42,6 +43,7 @@ export class OrdersService {
     private readonly users: UsersService,
     private readonly repo: OrdersRepository,
     private readonly config: ConfigService,
+    private readonly orderEmails: OrderEmailsService,
     @Optional() @Inject(STRIPE_CLIENT) private readonly stripe: StripeClient | null = null,
   ) {}
 
@@ -173,6 +175,10 @@ export class OrdersService {
         }
         const paid = await this.repo.markPaid(orderId, session.id, session.payment_intent ?? null);
         this.logger.log(paid ? `Order ${orderId} paid.` : `Order ${orderId}: payment event already handled.`);
+        if (paid) {
+          // Awaited so the serverless function does not stop before Resend answers; it never throws.
+          await this.orderEmails.send(orderId, 'paid');
+        }
         break;
       }
       case 'checkout.session.expired':

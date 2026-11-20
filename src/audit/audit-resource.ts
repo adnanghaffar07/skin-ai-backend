@@ -9,7 +9,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function auditTarget(url: string): AuditTarget | null {
   const path = url.split('?')[0];
   const parts = path.replace(/^\/api\/v1\/?/, '').split('/').filter(Boolean);
-  if (parts.length === 0 || parts[0] === 'health') {
+  // Health checks and app analytics are not access to anyone's data, and would drown the log.
+  if (parts.length === 0 || parts[0] === 'health' || parts[0] === 'events') {
     return null;
   }
   const id = parts.find((part, index) => index > 0 && UUID.test(part));

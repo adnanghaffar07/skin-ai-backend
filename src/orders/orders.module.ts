@@ -4,6 +4,7 @@ import { AdminGuard } from '../auth/admin.guard.js';
 import { UsersModule } from '../users/users.module.js';
 import { AdminOrdersController } from './admin-orders.controller.js';
 import { AdminOrdersService } from './admin-orders.service.js';
+import { OrderEmailsService } from './order-emails.js';
 import { OrdersController } from './orders.controller.js';
 import { OrdersRepository } from './orders.repository.js';
 import { OrdersService, STRIPE_CLIENT } from './orders.service.js';
@@ -17,6 +18,7 @@ import { StripeClient } from './stripe.js';
     OrdersRepository,
     OrdersService,
     AdminOrdersService,
+    OrderEmailsService,
     AdminGuard,
     {
       // No Stripe client while payments are off: checkout reports itself unavailable.

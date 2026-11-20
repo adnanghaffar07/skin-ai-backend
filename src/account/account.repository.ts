@@ -56,7 +56,14 @@ select json_build_object(
   'routine_completions', coalesce((select json_agg(x order by x.completed_at) from (
     select step_id, completed_on, completed_at from public.routine_step_completions where user_id = $1) x), '[]'),
   'progress', coalesce((select json_agg(x order by x.captured_on) from (
-    select scan_id, captured_on, overall_score from public.progress_entries where user_id = $1) x), '[]')
+    select scan_id, captured_on, overall_score from public.progress_entries where user_id = $1) x), '[]'),
+  'diary', coalesce((select json_agg(x order by x.entry_date) from (
+    select entry_date, skin_feel, concerns, morning_routine_done, evening_routine_done, new_products,
+      reaction, reaction_note, notes, created_at, updated_at
+    from public.diary_entries where user_id = $1) x), '[]'),
+  'app_events', coalesce((select json_agg(x order by x.occurred_at) from (
+    select name, occurred_at, platform, app_version, country, properties
+    from public.analytics_events where user_id = $1) x), '[]')
 ) as data`;
 
 @Injectable()

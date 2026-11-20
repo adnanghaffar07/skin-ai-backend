@@ -81,8 +81,19 @@ export class AdminOrderDto extends OrderDto {
   next_statuses!: string[];
 }
 
+export class OrderEmailDto {
+  @ApiProperty({ enum: ['paid', 'shipped', 'delivered', 'refunded'] }) kind!: string;
+  @ApiProperty({ enum: ['sending', 'sent', 'failed', 'skipped'], description: 'sent = accepted by Resend. skipped = email sending is off.' })
+  status!: string;
+  @ApiProperty() to!: string;
+  @ApiProperty({ type: String, nullable: true, description: 'Why it failed.' }) error!: string | null;
+  @ApiProperty() attempts!: number;
+  @ApiProperty() at!: string;
+}
+
 export class AdminOrderDetailDto extends AdminOrderDto {
   @ApiProperty({ type: [StatusEventDto] }) history!: StatusEventDto[];
+  @ApiProperty({ type: [OrderEmailDto], description: 'Emails sent to the customer about this order.' }) emails!: OrderEmailDto[];
 }
 
 export class AdminOrderListDto {
