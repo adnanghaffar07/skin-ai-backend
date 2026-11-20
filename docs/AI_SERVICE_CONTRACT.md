@@ -1,8 +1,21 @@
-# Clara AI service contract (v1)
+# Clara AI service contract (v1.1)
 
-**Date:** 2026-11-20
+**Date:** 2026-11-20 (v1.1 adds sections 0, 4a, 4b, 4c and 9)
 **For:** the AI/ML developer building the recommendation service, and the Clara API team.
 **Status:** proposal. Fields marked *open* need the AI developer's answer.
+
+## 0. Summary for the AI developer
+
+What Clara needs back from the AI service, in one response per person:
+
+1. **A skin analysis** (section 4a): skin type, concerns with how strong they are, and for each one *where it came from* (the questionnaire or the photo). Shown on the profile preview and dashboard.
+2. **Product recommendations** (section 4): real products from US stores with the store's own price, ranked by fit, 2–3 options per category at different prices, each with a short reason.
+3. **Routine guidance per product** (section 4b): morning/evening, how often, and cautions, so the routine screen can show frequency, cautions and substitutes.
+4. **A safety flag** (section 4c): when the answers or the photo suggest a severe reaction or a worrying skin change, say so, and Clara shows professional-care advice instead of only products.
+
+**The face scan is optional. When the person skips it (`scan: null`), the AI service must still return the full result (analysis, recommendations and routine guidance) from the questionnaire answers alone.** See section 4a.
+
+Hosting: please run the service yourself behind an HTTPS API and give Clara its URL and key (section 9).
 
 ## 1. Who calls whom
 
@@ -140,6 +153,71 @@ X-Request-Id: <uuid>          # same as body.request_id, for tracing on both sid
 | `summary` | Up to 300 characters, shown above the picks. Same language rules as `reason`. |
 | `limitations` | Short sentences Clara can show, such as "No sunscreen found within budget". |
 
+## 4a. Skin analysis (required, with or without a photo)
+
+Add an `analysis` object to the response:
+
+```json
+"analysis": {
+  "basis": "questionnaire_only",
+  "skin_type": { "value": "combination", "source": "questionnaire" },
+  "concerns": [
+    { "code": "acne_breakouts", "level": "moderate", "source": "questionnaire", "note": "You said breakouts are a main concern." },
+    { "code": "redness_sensitivity", "level": "mild", "source": "photo", "note": "Some redness around the nose in your photo." }
+  ],
+  "summary": "Combination skin with breakouts as the main focus.",
+  "limitations": ["No photo was analysed, so this is based on your answers only."]
+}
+```
+
+| Field | Rules |
+|---|---|
+| `basis` | `questionnaire_only` when `scan` is `null` or the photo could not be used; `questionnaire_and_photo` when photo findings were used. |
+| `skin_type.value` | `oily`, `dry`, `combination`, `normal`, `sensitive`, or `null` when unknown. |
+| `concerns[].code` | The questionnaire concern codes: `acne_breakouts`, `dark_spots`, `dryness_dehydration`, `fine_lines`, `redness_sensitivity`, `uneven_texture`. |
+| `concerns[].level` | `mild`, `moderate` or `high`. Never a percentage or "accuracy" score. |
+| `source` | `questionnaire` or `photo`, on every item. Clara must show the person which results came from their answers and which from the photo (spec Screen 04). |
+| `note` | One plain sentence shown to the person. Max 200 characters. |
+| `summary`, `limitations` | Shown as-is. |
+
+**When the scan is skipped (`scan: null`):**
+- Still return a complete `analysis`, `products` and routine guidance, built from the questionnaire answers: skin type (Q2), concerns (Q3), sensitivity (Q4), goal (Q5), current routine (Q6), reactions (Q7), budget (Q8), product interests (Q9).
+- Every item has `source: "questionnaire"` and `basis: "questionnaire_only"`.
+- Add a limitation such as "No photo was analysed, so this is based on your answers only."
+- Do not invent photo-style findings (no "your scan shows…").
+
+**When the photo is poor or the model is unsure** (spec decision point "scan confidence is low"): do not report photo findings you are not confident in. Fall back to the questionnaire as above, set `confidence: "low"`, and say why in `limitations` (for example "The photo was too dark to read").
+
+Language rules: wellness wording only. No diagnosis or disease names ("you have rosacea", "acne vulgaris"), no "treats" or "cures", no invented accuracy scores.
+
+## 4b. Routine guidance per product
+
+Clara's routine screen shows, for each step, how often, why the product was picked, ingredient cautions and a simpler alternative (spec Screen 07). Per product, please fill:
+
+| Field | Needed for |
+|---|---|
+| `routine.periods` | Morning, evening or both. Retinoids must be `["evening"]`. |
+| `routine.frequency` | `daily`, `alternate_days`, `2_3_per_week`, `weekly`. Strong actives (retinoids, AHA/BHA) should start at `2_3_per_week`. |
+| `reason` | "Why this product", tied to the person's answers or photo. |
+| `cautions` | The label's own warnings (plain text). |
+| `person_cautions` | **New, optional:** cautions specific to this person, for example `["Contains fragrance; you said fragrance stings."]`. |
+| `ingredients` | Full INCI list, so Clara can check avoided ingredients itself. |
+
+Substitutes: Clara takes them from your 2–3 options per category (section 6a), so please keep returning more than one option per category, including a gentler one (no fragrance or strong actives) where one exists.
+
+## 4c. Safety (required)
+
+Add a `safety` object:
+
+```json
+"safety": {
+  "refer_to_professional": false,
+  "reason": null
+}
+```
+
+Set `refer_to_professional: true` with a short, calm `reason` when the answers, `reaction_details` or the photo suggest a severe reaction (swelling, blistering, burning that does not ease, trouble breathing) or a changing, bleeding or unusual spot. Clara then shows advice to see a doctor or dermatologist above any products (spec decision point "User reports severe reaction or worrying lesion"). Do not name a condition.
+
 ## 5. Errors
 
 Any non-200 response, a timeout or a body that does not match this contract makes Clara fall back to its rule-based picks. Please answer errors as:
@@ -203,4 +281,23 @@ So please **rank by fit, not by price**, and return **two or three options per c
 3. Which stores and data sources you search, and whether their terms allow showing prices, images and descriptions in Clara.
 4. How you get ingredient lists, and how often you can return `null`.
 5. Request limits and cost per call, so Clara can cache results for similar profiles.
-6. Where the service is hosted (EU data is involved: the Clara database is in Ireland).
+6. Where the service is hosted. The Clara API and database run in Mumbai (ap-south-1), so a nearby region keeps calls fast.
+
+## 9. Hosting: please give us an API
+
+**Clara's choice: the AI developer hosts the model and gives Clara an HTTPS URL and a key.** Clara's backend is already built for this: set `AI_SERVICE_URL` and `AI_SERVICE_KEY` and it calls `POST {AI_SERVICE_URL}/v1/recommendations` as described above, with a fallback to Clara's own rule-based picks if the service is down.
+
+Why not push the model code into the Clara backend branch:
+- The Clara API runs on Vercel serverless functions (Node.js). They have a small size limit, no GPU, short time limits and no Python, so they cannot load or run an ML model.
+- Hosting it inside our backend would still mean a separate server (often with a GPU) that someone has to run, scale and pay for; that belongs with the people who own the model.
+- Keeping the service separate means the model can be updated, retrained and scaled without redeploying the Clara app or API.
+
+What we need from you:
+1. The HTTPS base URL (staging first, then production) and the API key, sent privately, never in chat or email.
+2. Typical and worst-case response time (section 2).
+3. A test request/response pair that matches this contract, including one with `scan: null`.
+4. Your rate limits and cost per call.
+5. The model version string you put in `model_version`, so we can trace answers.
+
+If you cannot host it yourselves, tell us early: we would then need to choose and pay for a separate model server (for example a GPU host), which is a separate project, not a branch of the Clara backend.
+
