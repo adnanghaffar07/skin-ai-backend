@@ -25,6 +25,7 @@ import {
   ScanDto,
   ScanListDto,
   ScanResultDto,
+  SubmitScanDto,
   SubmitScanResponseDto,
   UploadUrlDto,
   UploadUrlResponseDto,
@@ -41,7 +42,7 @@ export class ScansController {
   @ApiOperation({
     summary: 'Create a scan waiting for a photo',
     description:
-      'Needs a live facial_image_processing consent, a completed onboarding submission with face_scan_opt_in = start_scan, and a user who is not under 18. The same Idempotency-Key returns the original scan.',
+      'Needs a live facial_image_processing consent, a completed onboarding submission, and a user who is not under 18. Storing the photo (upload-url) also needs a live ai_model_training consent. The same Idempotency-Key returns the original scan.',
   })
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiCreatedResponse({ type: ScanDto })
@@ -97,8 +98,9 @@ export class ScansController {
   submit(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: SubmitScanDto,
   ): Promise<SubmitScanResponseDto> {
-    return this.scans.submit(user, id);
+    return this.scans.submit(user, id, body);
   }
 
   @Get(':id/result')

@@ -73,15 +73,18 @@ export class ScansRepository {
   }
 
   /** Whether the latest facial-image consent is a grant. Withdrawing is a newer record, so the latest one decides. */
-  async hasLiveConsent(userId: string): Promise<boolean> {
+  async hasLiveConsent(
+    userId: string,
+    purpose: 'facial_image_processing' | 'ai_model_training' = 'facial_image_processing',
+  ): Promise<boolean> {
     const rows = await this.database.query<{ live: boolean }>(
       `select coalesce((
          select c.granted and c.revoked_at is null
          from public.consent_records c
-         where c.user_id = $1 and c.purpose = 'facial_image_processing'
+         where c.user_id = $1 and c.purpose = $2::public.consent_purpose
          order by c.granted_at desc limit 1
        ), false) as live`,
-      [userId],
+      [userId, purpose],
     );
     return rows[0]?.live === true;
   }
@@ -191,6 +194,7 @@ export class ScansRepository {
   async markSubmitted(
     scanId: string,
     byteSize: number,
+    quality: Record<string, number | boolean> | null = null,
   ): Promise<{ submitted_at: Date } | null> {
     return this.database.transaction(async (db) => {
       const rows = await db.query<{ submitted_at: Date }>(
@@ -204,8 +208,8 @@ export class ScansRepository {
         return null;
       }
       await db.query(
-        `update public.scan_images set byte_size = $2 where scan_id = $1`,
-        [scanId, byteSize],
+        `update public.scan_images set byte_size = $2, quality = $3 where scan_id = $1`,
+        [scanId, byteSize, quality === null ? null : JSON.stringify(quality)],
       );
       return rows[0];
     });

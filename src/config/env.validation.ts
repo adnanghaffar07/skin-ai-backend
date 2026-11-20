@@ -35,6 +35,15 @@ export class EnvironmentVariables {
   @Matches(/^sb_publishable_/)
   SUPABASE_PUBLISHABLE_KEY!: string;
 
+  /**
+   * Supabase secret key (sb_secret_..., or the older service_role key), used only for the private scan-photos bucket.
+   * Without it photo uploads answer 503.
+   */
+  @IsOptional()
+  @IsString()
+  @Matches(/^(sb_secret_|eyJ)/)
+  SUPABASE_SECRET_KEY?: string;
+
   @IsOptional()
   @IsString()
   @Matches(/^postgres(ql)?:\/\//)
@@ -158,6 +167,7 @@ export function validateEnv(
       EMAIL_FROM: config.EMAIL_FROM || undefined,
       EMAIL_REPLY_TO: config.EMAIL_REPLY_TO || undefined,
       SUPABASE_EMAIL_HOOK_SECRET: config.SUPABASE_EMAIL_HOOK_SECRET || undefined,
+      SUPABASE_SECRET_KEY: config.SUPABASE_SECRET_KEY || undefined,
     },
     { enableImplicitConversion: true },
   );

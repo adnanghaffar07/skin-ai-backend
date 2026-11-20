@@ -6,6 +6,7 @@ export const CONSENT_PURPOSES = [
   'camera_access',
   'photo_library',
   'terms_of_service',
+  'ai_model_training',
 ] as const;
 
 export class CreateConsentDto {

@@ -254,6 +254,14 @@ Today the photo is analysed on the phone and **never leaves it**; the consent sc
 
 **Question for the AI developer:** which does your model need?
 
+### 6b. Photos kept for training (from 21 Nov 2026)
+
+People can now opt in, separately from the scan itself, to Clara keeping their scan photos to improve the skin model (consent `ai_model_training`). Only photos that pass every check on the phone are kept: one face only, the whole face in frame, close enough (face at least 25% of the photo width and 300 px), not turned or tilted (under 15°), sharp, and evenly and well lit.
+
+- Where: Supabase Storage, private bucket `scan-photos`, key `scans/<user_id>/<scan_id>/<id>.jpg`. Upright JPEG, at most 1600 px on the long side.
+- Index: `public.scan_images` (one row per photo) with `quality` (detector score, face size, sharpness, head turn and tilt) for filtering.
+- Rules: use a photo only while that person's latest `ai_model_training` consent is granted and not revoked. Deleting an account deletes its photos. Never share or sell them; do not copy them outside Clara's storage without agreeing it with Clara first.
+
 ## 6a. Budget
 
 `profile.monthly_budget` is the person's budget **for the whole routine per month**, compared with what they pay at Clara (store price plus Clara's markup). Ceilings: `under_20` → 20, `20_50` → 50, `50_100` → 100; `100_plus` and `no_budget` have none.

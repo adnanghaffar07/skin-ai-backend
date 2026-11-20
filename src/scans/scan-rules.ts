@@ -89,13 +89,36 @@ export function assertCanCreateScan(input: ScanEligibilityInput): void {
       'Onboarding must be completed before a scan.',
     );
   }
-  if (input.faceScanOptIn !== 'start_scan') {
-    throw new ApiException(
-      422,
-      ErrorCode.VALIDATION_ERROR,
-      'Face scan was not chosen in onboarding.',
-    );
+  // Choosing "not now" at the end of onboarding does not stop a scan later from the Scan tab: consent is the gate.
+}
+
+/** The photo checks the phone sends with a photo, kept for sorting training photos. Unknown or odd values are dropped. */
+const QUALITY_FIELDS = {
+  detector_score: 'number',
+  other_faces: 'number',
+  face_width_ratio: 'number',
+  face_pixels: 'number',
+  sharpness: 'number',
+  yaw: 'number',
+  roll_degrees: 'number',
+  cut_off: 'boolean',
+  rotation: 'number',
+} as const;
+
+export function cleanQuality(raw: unknown): Record<string, number | boolean> | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
   }
+  const out: Record<string, number | boolean> = {};
+  for (const [key, type] of Object.entries(QUALITY_FIELDS)) {
+    const value = (raw as Record<string, unknown>)[key];
+    if (type === 'number' && typeof value === 'number' && Number.isFinite(value)) {
+      out[key] = Math.round(value * 1000) / 1000;
+    } else if (type === 'boolean' && typeof value === 'boolean') {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 export function assertImageMatches(

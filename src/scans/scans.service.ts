@@ -10,6 +10,7 @@ import type {
   ScanDto,
   ScanListDto,
   ScanResultDto,
+  SubmitScanDto,
   SubmitScanResponseDto,
   UploadUrlDto,
   UploadUrlResponseDto,
@@ -18,6 +19,7 @@ import {
   assertCanCreateScan,
   assertImageMatches,
   assertUploadAllowed,
+  cleanQuality,
   scanObjectKey,
   UPLOAD_URL_TTL_SECONDS,
 } from './scan-rules.js';
@@ -113,6 +115,14 @@ export class ScansService {
     const scan = await this.requireScan(user.id, scanId);
     this.assertAwaitingUpload(scan);
     await this.assertConsentStillLive(user.id);
+    // A photo is only kept when the person also agreed to it being used to train Clara's skin model.
+    if (!(await this.scans.hasLiveConsent(user.id, 'ai_model_training'))) {
+      throw new ApiException(
+        422,
+        ErrorCode.CONSENT_REQUIRED,
+        'Consent to use the photo for improving Clara (ai_model_training) is required before it can be stored.',
+      );
+    }
     assertUploadAllowed(body.content_type, body.byte_size);
     const previous = await this.scans.getImage(scan.id);
     const objectKey = scanObjectKey(
@@ -143,6 +153,7 @@ export class ScansService {
   async submit(
     user: AuthenticatedUser,
     scanId: string,
+    body: SubmitScanDto = {},
   ): Promise<SubmitScanResponseDto> {
     const scan = await this.requireScan(user.id, scanId);
     this.assertAwaitingUpload(scan);
@@ -160,7 +171,7 @@ export class ScansService {
       contentType: image.content_type,
       byteSize: image.byte_size,
     });
-    const done = await this.scans.markSubmitted(scan.id, head!.byteSize);
+    const done = await this.scans.markSubmitted(scan.id, head!.byteSize, cleanQuality(body.quality));
     if (!done) {
       throw new ApiException(
         409,

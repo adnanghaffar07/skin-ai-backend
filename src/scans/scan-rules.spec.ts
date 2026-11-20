@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertCanCreateScan,
+  cleanQuality,
   isUnder18,
   assertImageMatches,
   assertUploadAllowed,
@@ -45,12 +46,24 @@ describe('assertCanCreateScan', () => {
       codeOf(() => assertCanCreateScan({ ...ok, submissionCompleted: false })),
     ).toBe('VALIDATION_ERROR');
   });
-  it('requires start_scan', () => {
+  it('allows a later scan when onboarding said "not now"', () => {
     expect(
       codeOf(() =>
         assertCanCreateScan({ ...ok, faceScanOptIn: 'continue_without_scan' }),
       ),
-    ).toBe('VALIDATION_ERROR');
+    ).toBeUndefined();
+  });
+});
+
+describe('cleanQuality', () => {
+  it('keeps the known photo checks and drops anything else', () => {
+    expect(
+      cleanQuality({ sharpness: 48.23456, cut_off: false, other_faces: 0, note: 'x', yaw: 'high', face_pixels: Infinity }),
+    ).toEqual({ sharpness: 48.235, cut_off: false, other_faces: 0 });
+  });
+  it('is null when nothing usable was sent', () => {
+    expect(cleanQuality(undefined)).toBeNull();
+    expect(cleanQuality({ junk: 1 })).toBeNull();
   });
 });
 

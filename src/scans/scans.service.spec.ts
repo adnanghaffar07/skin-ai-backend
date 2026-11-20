@@ -130,7 +130,7 @@ describe('ScansService', () => {
     });
     const out = await service.submit(user, 's1');
     expect(out).toMatchObject({ status: 'ready_for_analysis', analysis_available: false });
-    expect(markSubmitted).toHaveBeenCalledWith('s1', 5);
+    expect(markSubmitted).toHaveBeenCalledWith('s1', 5, null);
   });
 
   it('result is honest and empty', async () => {
@@ -200,6 +200,16 @@ describe('ScansService', () => {
     await expect(
       service.uploadUrl(user, 's1', { content_type: 'image/jpeg', byte_size: 1000 }),
     ).rejects.toMatchObject({ status: 422 });
+    expect(storage.createSignedUpload).not.toHaveBeenCalled();
+  });
+
+  it('does not store a photo without the training consent', async () => {
+    const hasLiveConsent = vi.fn(async (_user: string, purpose = 'facial_image_processing') => purpose !== 'ai_model_training');
+    const { service, storage } = build({ repo: { hasLiveConsent } });
+    await expect(
+      service.uploadUrl(user, 's1', { content_type: 'image/jpeg', byte_size: 1000 }),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(hasLiveConsent).toHaveBeenCalledWith('u1', 'ai_model_training');
     expect(storage.createSignedUpload).not.toHaveBeenCalled();
   });
 

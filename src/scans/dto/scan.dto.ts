@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsInt, IsUUID, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsObject, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES } from '../scan-rules.js';
 
 export class CreateScanDto {
@@ -18,6 +18,17 @@ export class UploadUrlDto {
   @Min(1)
   @Max(MAX_IMAGE_BYTES)
   byte_size!: number;
+}
+
+export class SubmitScanDto {
+  @ApiProperty({
+    required: false,
+    description: 'Photo checks measured on the phone, saved with the photo.',
+    example: { detector_score: 0.97, other_faces: 0, face_width_ratio: 0.52, face_pixels: 1580, sharpness: 48.2, yaw: 0.03, roll_degrees: 2.1, cut_off: false, rotation: 0 },
+  })
+  @IsOptional()
+  @IsObject()
+  quality?: Record<string, unknown>;
 }
 
 export class ScanDto {
