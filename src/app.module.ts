@@ -15,6 +15,7 @@ import { PreferencesModule } from './preferences/preferences.module.js';
 import { ScansModule } from './scans/scans.module.js';
 import { StorageModule } from './storage/storage.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
+import { OrdersModule } from './orders/orders.module.js';
 import { RecommendationsModule } from './recommendations/recommendations.module.js';
 import { RoutinesModule } from './routines/routines.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -40,6 +41,7 @@ import { UsersModule } from './users/users.module.js';
     ScansModule,
     CatalogModule,
     RecommendationsModule,
+    OrdersModule,
     RoutinesModule,
     DashboardModule,
   ],

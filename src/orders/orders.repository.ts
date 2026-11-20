@@ -1,0 +1,239 @@
+import { Injectable } from '@nestjs/common';
+import type { QueryResultRow } from 'pg';
+import { DatabaseService } from '../database/database.service.js';
+
+/** A product as it can be ordered right now: Clara's current price and where the team buys it. */
+export interface OrderableProduct extends QueryResultRow {
+  id: string;
+  name: string;
+  brand: string;
+  image_url: string | null;
+  currency_code: string | null;
+  amount: string | null;
+  retailer_name: string | null;
+  retailer_url: string | null;
+  retailer_external_id: string | null;
+  store_amount: string | null;
+  in_stock: boolean | null;
+}
+
+export interface OrderRow extends QueryResultRow {
+  id: string;
+  number: string;
+  status: string;
+  market_code: string;
+  currency_code: string;
+  subtotal_amount: string;
+  shipping_option: string;
+  shipping_amount: string;
+  total_amount: string;
+  contact_name: string;
+  contact_email: string;
+  contact_phone: string;
+  shipping_address: string;
+  delivery_note: string | null;
+  payment_session_id: string | null;
+  payment_session_url: string | null;
+  carrier: string | null;
+  tracking_number: string | null;
+  paid_at: Date | null;
+  ordered_from_store_at: Date | null;
+  shipped_at: Date | null;
+  delivered_at: Date | null;
+  cancelled_at: Date | null;
+  created_at: Date;
+}
+
+export interface OrderItemRow extends QueryResultRow {
+  order_id: string;
+  product_id: string;
+  product_name: string;
+  brand_name: string;
+  image_url: string | null;
+  quantity: number;
+  unit_amount: string;
+  line_amount: string;
+}
+
+export interface NewOrder {
+  userId: string;
+  idempotencyKey: string;
+  market: string;
+  currency: string;
+  subtotal: string;
+  shippingOption: string;
+  shipping: string;
+  total: string;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  shippingAddress: string;
+  deliveryNote: string | null;
+  items: {
+    product: OrderableProduct;
+    quantity: number;
+    unit: string;
+    line: string;
+  }[];
+}
+
+const ORDER_COLUMNS = `
+  o.id, o.number::text as number, o.status, o.market_code, o.currency_code,
+  o.subtotal_amount::text as subtotal_amount, o.shipping_option, o.shipping_amount::text as shipping_amount,
+  o.total_amount::text as total_amount, o.contact_name, o.contact_email, o.contact_phone, o.shipping_address,
+  o.delivery_note, o.payment_session_id, o.payment_session_url, o.carrier, o.tracking_number, o.paid_at, o.ordered_from_store_at,
+  o.shipped_at, o.delivered_at, o.cancelled_at, o.created_at
+`;
+
+@Injectable()
+export class OrdersRepository {
+  constructor(private readonly database: DatabaseService) {}
+
+  /** Current price (cheapest active variant, as in the catalogue) and the freshest store offer for each product. */
+  loadProducts(ids: string[], market: string): Promise<OrderableProduct[]> {
+    return this.database.query<OrderableProduct>(
+      `
+      select p.id, p.name, b.name as brand,
+        (select m.url from public.product_media m where m.product_id = p.id order by m.position limit 1) as image_url,
+        price.currency_code, price.amount::text as amount,
+        offer.retailer_name, offer.url as retailer_url, offer.external_id as retailer_external_id,
+        offer.store_amount::text as store_amount, offer.in_stock
+      from public.products p
+      join public.brands b on b.id = p.brand_id
+      join public.product_market_availability a on a.product_id = p.id and a.market_code = $2 and a.is_available
+      left join lateral (
+        select pr.currency_code, pr.amount
+        from public.product_variants v
+        join public.product_prices pr on pr.variant_id = v.id and pr.market_code = $2
+        where v.product_id = p.id and v.status = 'active'
+          and pr.effective_from <= now() and (pr.effective_to is null or pr.effective_to > now())
+        order by pr.amount asc limit 1
+      ) price on true
+      left join lateral (
+        select o.retailer_name, o.url, o.external_id, o.store_amount, o.in_stock
+        from public.product_offers o
+        where o.product_id = p.id and o.market_code = $2
+        order by o.in_stock desc, o.checked_at desc limit 1
+      ) offer on true
+      where p.id = any($1::uuid[]) and p.status = 'active' and p.deleted_at is null
+      `,
+      [ids, market],
+    );
+  }
+
+  async findByIdempotencyKey(userId: string, key: string): Promise<OrderRow | null> {
+    const rows = await this.database.query<OrderRow>(
+      `select ${ORDER_COLUMNS} from public.orders o where o.user_id = $1 and o.idempotency_key = $2`,
+      [userId, key],
+    );
+    return rows[0] ?? null;
+  }
+
+  /** Saves the order and its items together; returns null when the same Idempotency-Key raced in first. */
+  create(order: NewOrder): Promise<OrderRow | null> {
+    return this.database.transaction(async (db) => {
+      const rows = await db.query<OrderRow>(
+        `
+        insert into public.orders (user_id, idempotency_key, market_code, currency_code, subtotal_amount, shipping_option,
+          shipping_amount, total_amount, contact_name, contact_email, contact_phone, shipping_address, delivery_note,
+          payment_provider)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'stripe')
+        on conflict (user_id, idempotency_key) do nothing
+        returning id
+        `,
+        [
+          order.userId, order.idempotencyKey, order.market, order.currency, order.subtotal, order.shippingOption,
+          order.shipping, order.total, order.contactName, order.contactEmail, order.contactPhone,
+          order.shippingAddress, order.deliveryNote,
+        ],
+      );
+      const id = rows[0]?.id;
+      if (!id) {
+        return null;
+      }
+      for (const item of order.items) {
+        await db.query(
+          `
+          insert into public.order_items (order_id, product_id, product_name, brand_name, image_url, quantity,
+            unit_amount, line_amount, retailer_name, retailer_url, retailer_external_id, store_unit_amount)
+          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          `,
+          [
+            id, item.product.id, item.product.name, item.product.brand, item.product.image_url, item.quantity,
+            item.unit, item.line, item.product.retailer_name, item.product.retailer_url,
+            item.product.retailer_external_id, item.product.store_amount,
+          ],
+        );
+      }
+      const saved = await db.query<OrderRow>(`select ${ORDER_COLUMNS} from public.orders o where o.id = $1`, [id]);
+      return saved[0] ?? null;
+    });
+  }
+
+  async setPaymentSession(orderId: string, sessionId: string, url: string): Promise<void> {
+    await this.database.query(
+      `update public.orders set payment_session_id = $2, payment_session_url = $3 where id = $1 and payment_session_id is null`,
+      [orderId, sessionId, url],
+    );
+  }
+
+  /** Marks a waiting order paid. Returns false when it was already paid (Stripe can send an event more than once). */
+  async markPaid(orderId: string, sessionId: string, paymentIntentId: string | null): Promise<boolean> {
+    const rows = await this.database.query(
+      `
+      update public.orders set status = 'paid', paid_at = now(), payment_intent_id = $3,
+        payment_session_id = coalesce(payment_session_id, $2)
+      where id = $1 and status = 'pending_payment' and (payment_session_id is null or payment_session_id = $2)
+      returning id
+      `,
+      [orderId, sessionId, paymentIntentId],
+    );
+    return rows.length > 0;
+  }
+
+  /** The payment page expired without a payment: the order will not go ahead. */
+  async markPaymentExpired(orderId: string, sessionId: string): Promise<boolean> {
+    const rows = await this.database.query(
+      `
+      update public.orders set status = 'cancelled', cancelled_at = now()
+      where id = $1 and status = 'pending_payment' and payment_session_id = $2
+      returning id
+      `,
+      [orderId, sessionId],
+    );
+    return rows.length > 0;
+  }
+
+  findOrderTotal(orderId: string): Promise<{ total_amount: string; currency_code: string }[]> {
+    return this.database.query(`select total_amount::text, currency_code from public.orders where id = $1`, [orderId]);
+  }
+
+  listForUser(userId: string, limit = 50): Promise<OrderRow[]> {
+    return this.database.query<OrderRow>(
+      `select ${ORDER_COLUMNS} from public.orders o where o.user_id = $1 order by o.created_at desc limit $2`,
+      [userId, limit],
+    );
+  }
+
+  async findForUser(userId: string, orderId: string): Promise<OrderRow | null> {
+    const rows = await this.database.query<OrderRow>(
+      `select ${ORDER_COLUMNS} from public.orders o where o.user_id = $1 and o.id = $2`,
+      [userId, orderId],
+    );
+    return rows[0] ?? null;
+  }
+
+  itemsFor(orderIds: string[]): Promise<OrderItemRow[]> {
+    if (orderIds.length === 0) {
+      return Promise.resolve([]);
+    }
+    return this.database.query<OrderItemRow>(
+      `
+      select order_id, product_id, product_name, brand_name, image_url, quantity,
+        unit_amount::text as unit_amount, line_amount::text as line_amount
+      from public.order_items where order_id = any($1::uuid[]) order by created_at, product_name
+      `,
+      [orderIds],
+    );
+  }
+}

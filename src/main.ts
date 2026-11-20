@@ -6,7 +6,8 @@ import { AppModule } from './app.module.js';
 import { configureApp } from './app.setup.js';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: the Stripe webhook checks its signature against the exact bytes Stripe sent.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   configureApp(app);
   const config = app.get(ConfigService);
   const port = config.get<number>('PORT', 3000);

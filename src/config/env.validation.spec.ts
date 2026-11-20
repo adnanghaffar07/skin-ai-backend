@@ -15,6 +15,10 @@ describe('validateEnv', () => {
       AI_SERVICE_KEY: undefined,
       AI_TIMEOUT_MS: 30000,
       PRICE_MARKUP_PERCENT: 8.5,
+      PAYMENTS_MODE: 'off',
+      STRIPE_SECRET_KEY: undefined,
+      STRIPE_WEBHOOK_SECRET: undefined,
+      PUBLIC_BASE_URL: 'https://clara-skin-api.vercel.app',
     });
   });
 
@@ -32,6 +36,10 @@ describe('validateEnv', () => {
       AI_SERVICE_KEY: undefined,
       AI_TIMEOUT_MS: 30000,
       PRICE_MARKUP_PERCENT: 8.5,
+      PAYMENTS_MODE: 'off',
+      STRIPE_SECRET_KEY: undefined,
+      STRIPE_WEBHOOK_SECRET: undefined,
+      PUBLIC_BASE_URL: 'https://clara-skin-api.vercel.app',
     });
   });
 
@@ -78,5 +86,13 @@ describe('validateEnv', () => {
   it('rejects a markup outside 0-100 percent', () => {
     expect(() => validateEnv({ PRICE_MARKUP_PERCENT: '-1' })).toThrow(/Environment validation failed/);
     expect(() => validateEnv({ PRICE_MARKUP_PERCENT: '150' })).toThrow(/Environment validation failed/);
+  });
+
+  it('turns checkout on only with both Stripe keys', () => {
+    expect(validateEnv({}).PAYMENTS_MODE).toBe('off');
+    expect(() => validateEnv({ STRIPE_SECRET_KEY: 'sk_test_x' })).toThrow(/STRIPE_WEBHOOK_SECRET/);
+    expect(() => validateEnv({ PAYMENTS_MODE: 'stripe', STRIPE_WEBHOOK_SECRET: 'whsec_x' })).toThrow(/STRIPE_SECRET_KEY/);
+    expect(validateEnv({ STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_WEBHOOK_SECRET: 'whsec_x' }).PAYMENTS_MODE).toBe('stripe');
+    expect(validateEnv({ PAYMENTS_MODE: 'off', STRIPE_SECRET_KEY: 'sk_test_x' }).PAYMENTS_MODE).toBe('off');
   });
 });
