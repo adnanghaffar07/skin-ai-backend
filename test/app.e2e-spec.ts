@@ -37,10 +37,11 @@ describe('AppController (e2e)', () => {
       .get('/api/v1/health')
       .expect(200)
       .expect((response) => {
-        expect(response.body).toEqual({
+        expect(response.body).toMatchObject({
           status: 'ok',
           service: 'skincare-api',
         });
+        expect(['on', 'off', 'stub']).toContain(response.body.ai);
         expect(response.headers['x-request-id']).toEqual(expect.any(String));
       });
   });

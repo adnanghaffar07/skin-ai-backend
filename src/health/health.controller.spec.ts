@@ -10,7 +10,7 @@ describe('HealthController', () => {
     }).compile();
 
     const controller = module.get(HealthController);
-    expect(controller.getHealth()).toEqual({
+    expect(controller.getHealth()).toMatchObject({
       status: 'ok',
       service: 'skincare-api',
     });
