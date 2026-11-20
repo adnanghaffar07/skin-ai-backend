@@ -7,6 +7,29 @@ import { ApiException } from '../common/http/api.exception.js';
 
 const { Pool } = pg;
 
+const SSL_PARAMS = ['sslmode', 'ssl', 'sslcert', 'sslkey', 'sslrootcert', 'uselibpqcompat'];
+
+/** The URL without SSL query parameters, so the ssl option passed to the pool is the one that applies. */
+export function withoutSslParams(connectionString: string): string {
+  try {
+    const url = new URL(connectionString);
+    SSL_PARAMS.forEach((param) => url.searchParams.delete(param));
+    return url.toString();
+  } catch {
+    return connectionString;
+  }
+}
+
+/** Supabase's direct database host (db.<ref>.supabase.co) or its pooler (<region>.pooler.supabase.com). */
+export function isSupabaseHost(connectionString: string): boolean {
+  try {
+    const host = new URL(connectionString).hostname;
+    return host.endsWith('.supabase.co') || host.endsWith('.supabase.com');
+  } catch {
+    return /\.supabase\.(co|com)[:/]/.test(connectionString);
+  }
+}
+
 export interface Queryable {
   query<T extends pg.QueryResultRow>(
     sql: string,
@@ -55,15 +78,16 @@ export class DatabaseService implements Queryable, OnModuleDestroy {
     this.pool = null;
   }
 
-  /** With DATABASE_SSL_CA the certificate is verified. Without it Supabase connections stay encrypted but unverified. */
+  /**
+   * With DATABASE_SSL_CA the certificate is verified. Without it Supabase connections (the direct db.<ref>.supabase.co
+   * host and the <region>.pooler.supabase.com pooler) stay encrypted but unverified.
+   */
   private sslOptions(connectionString: string): ConnectionOptions | undefined {
     const ca = this.config.get<string>('DATABASE_SSL_CA');
     if (ca) {
       return { ca, rejectUnauthorized: true };
     }
-    return connectionString.includes('supabase.co')
-      ? { rejectUnauthorized: false }
-      : undefined;
+    return isSupabaseHost(connectionString) ? { rejectUnauthorized: false } : undefined;
   }
 
   private getPool(): pg.Pool {
@@ -79,7 +103,9 @@ export class DatabaseService implements Queryable, OnModuleDestroy {
       );
     }
     this.pool = new Pool({
-      connectionString,
+      // SSL settings in the URL (sslmode=...) would override the ones below and, in pg 8, demand full verification
+      // against Node's default certificates, which Supabase's pooler does not chain to. The options below decide.
+      connectionString: withoutSslParams(connectionString),
       // Each Vercel instance keeps few connections, so many instances cannot exhaust the database pooler.
       max: process.env.VERCEL ? 3 : 10,
       ssl: this.sslOptions(connectionString),
