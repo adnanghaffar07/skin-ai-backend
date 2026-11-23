@@ -1,16 +1,17 @@
 import { ApiException } from '../common/http/api.exception.js';
 import { ErrorCode } from '../common/filters/error-codes.js';
-import type { ObjectStorage } from '../storage/object-storage.js';
+import type { MediaStorage, ObjectStorage } from '../storage/object-storage.js';
 import type { AccountRepository } from './account.repository.js';
 import { AccountService } from './account.service.js';
 
 const user = { id: '8c1f0a52-3e4b-4d7a-9f10-6b2c8d0e1a77', email: 'a@example.com', displayName: null };
 
-function setup(keys: string[], deleteFails = false) {
+function setup(keys: string[], deleteFails = false, mediaKeys: string[] = []) {
   const calls: string[] = [];
   const repository = {
     exportData: async () => ({ profile: { display_name: 'Ayesha' } }),
     photoKeys: async () => keys,
+    mediaKeys: async () => mediaKeys,
     deleteAccount: async () => {
       calls.push('account');
     },
@@ -23,7 +24,12 @@ function setup(keys: string[], deleteFails = false) {
       calls.push(`photo:${key}`);
     },
   } as unknown as ObjectStorage;
-  return { service: new AccountService(repository, storage), calls };
+  const media = {
+    delete: async (key: string) => {
+      calls.push(`media:${key}`);
+    },
+  } as unknown as MediaStorage;
+  return { service: new AccountService(repository, storage, media), calls };
 }
 
 describe('AccountService', () => {
@@ -31,6 +37,12 @@ describe('AccountService', () => {
     const { service, calls } = setup(['scans/u/1/a.jpg', 'scans/u/2/b.jpg']);
     await service.deleteAccount(user);
     expect(calls).toEqual(['photo:scans/u/1/a.jpg', 'photo:scans/u/2/b.jpg', 'account']);
+  });
+
+  it('also removes the profile photo before deleting the account', async () => {
+    const { service, calls } = setup(['scans/u/1/a.jpg'], false, ['users/u/avatar-1.jpg']);
+    await service.deleteAccount(user);
+    expect(calls).toEqual(['photo:scans/u/1/a.jpg', 'media:users/u/avatar-1.jpg', 'account']);
   });
 
   it('keeps the account when a photo cannot be removed', async () => {

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Patch, Post, Put } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -8,6 +8,8 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-user.js';
+import { AvatarService } from './avatar.service.js';
+import { AvatarDto, AvatarUploadDto, AvatarUploadLinkDto, ConfirmAvatarDto } from './dto/avatar.dto.js';
 import { MeResponseDto } from './dto/me-response.dto.js';
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
 import { UsersService } from './users.service.js';
@@ -38,7 +40,10 @@ const meExample = {
 @ApiBearerAuth()
 @Controller('me')
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    private readonly avatars: AvatarService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -47,8 +52,9 @@ export class UsersController {
       'Creates the application user from the Supabase token when this is the first call. Email is read from the token. A body field named user_id is rejected.',
   })
   @ApiOkResponse({ type: MeResponseDto, example: meExample })
-  getMe(@CurrentUser() user: AuthenticatedUser): Promise<MeResponseDto> {
-    return this.users.getMe(user);
+  async getMe(@CurrentUser() user: AuthenticatedUser): Promise<MeResponseDto> {
+    const me = await this.users.getMe(user);
+    return { ...me, avatar_url: await this.avatars.url(user.id) };
   }
 
   @Patch()
@@ -58,10 +64,38 @@ export class UsersController {
   })
   @ApiBody({ type: UpdateProfileDto })
   @ApiOkResponse({ type: MeResponseDto, example: meExample })
-  updateMe(
+  async updateMe(
     @CurrentUser() user: AuthenticatedUser,
     @Body() patch: UpdateProfileDto,
   ): Promise<MeResponseDto> {
-    return this.users.updateMe(user, patch);
+    const me = await this.users.updateMe(user, patch);
+    return { ...me, avatar_url: await this.avatars.url(user.id) };
+  }
+
+  @Post('avatar/upload-url')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Get a link to upload a profile photo',
+    description: 'PUT the picture to `upload_url` with the given headers, then confirm with PUT /me/avatar and `object_key`.',
+  })
+  @ApiBody({ type: AvatarUploadDto })
+  @ApiOkResponse({ type: AvatarUploadLinkDto })
+  avatarUploadUrl(@CurrentUser() user: AuthenticatedUser, @Body() body: AvatarUploadDto): Promise<AvatarUploadLinkDto> {
+    return this.avatars.uploadUrl(user, body.content_type, body.byte_size);
+  }
+
+  @Put('avatar')
+  @ApiOperation({ summary: 'Use the uploaded picture as the profile photo', description: 'The previous photo is deleted.' })
+  @ApiBody({ type: ConfirmAvatarDto })
+  @ApiOkResponse({ type: AvatarDto })
+  confirmAvatar(@CurrentUser() user: AuthenticatedUser, @Body() body: ConfirmAvatarDto): Promise<AvatarDto> {
+    return this.avatars.confirm(user, body.object_key);
+  }
+
+  @Delete('avatar')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Remove the profile photo' })
+  async removeAvatar(@CurrentUser() user: AuthenticatedUser): Promise<void> {
+    await this.avatars.remove(user);
   }
 }

@@ -9,6 +9,8 @@ import {
 
 /** The private bucket made by the scan_photo_storage migration. */
 export const SCAN_PHOTOS_BUCKET = 'scan-photos';
+/** The private bucket made by the user_media migration (profile photos). */
+export const USER_MEDIA_BUCKET = 'user-media';
 
 /** Where the secret key comes from: a fixed value (SUPABASE_SECRET_KEY), or a lookup such as Supabase Vault. */
 export type SecretKeySource = string | (() => Promise<string | null>);
@@ -23,7 +25,6 @@ const MISSING_KEY_RETRY_MS = 60_000;
  */
 export class SupabaseStorage extends ObjectStorage {
   readonly provider = 'supabase';
-  readonly bucket = SCAN_PHOTOS_BUCKET;
   private readonly base: string;
   private key: string | null = null;
   private missingUntil = 0;
@@ -32,6 +33,7 @@ export class SupabaseStorage extends ObjectStorage {
     supabaseUrl: string,
     private readonly keySource: SecretKeySource,
     private readonly fetchImpl: typeof fetch = fetch,
+    readonly bucket: string = SCAN_PHOTOS_BUCKET,
   ) {
     super();
     this.base = `${supabaseUrl.replace(/\/+$/, '')}/storage/v1`;
@@ -101,6 +103,19 @@ export class SupabaseStorage extends ObjectStorage {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prefixes: [key] }),
     });
+  }
+
+  async createSignedDownload(key: string, expiresInSeconds: number): Promise<string> {
+    const response = await this.call(`/object/sign/${this.bucket}/${this.path(key)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiresIn: expiresInSeconds }),
+    });
+    const body = (await response.json()) as { signedURL?: string };
+    if (!body.signedURL) {
+      throw this.unavailable('Storage did not return a link.');
+    }
+    return `${this.base}${body.signedURL}`;
   }
 
   private path(key: string): string {

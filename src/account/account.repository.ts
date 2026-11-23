@@ -61,6 +61,15 @@ select json_build_object(
     select entry_date, skin_feel, concerns, morning_routine_done, evening_routine_done, new_products,
       reaction, reaction_note, notes, created_at, updated_at
     from public.diary_entries where user_id = $1) x), '[]'),
+  'scan_results', coalesce((select json_agg(x order by x.analysed_at) from (
+    select client_id, analysed_at, source, metrics, issues from public.scan_results where user_id = $1) x), '[]'),
+  'profile_photo', (select avatar_object_key is not null from public.user_profiles where user_id = $1),
+  'saved_lists', (select json_build_object('wishlist', wishlist, 'cart', cart) from public.user_saved_lists where user_id = $1),
+  'consultation_notes', coalesce((select json_agg(x order by x.visited_on) from (
+    select doctor_name, visited_on, title, notes, photo_object_key is not null as has_photo, created_at
+    from public.consultation_notes where user_id = $1) x), '[]'),
+  'reviews', coalesce((select json_agg(x order by x.created_at) from (
+    select product_id, rating, body, created_at, updated_at from public.product_reviews where user_id = $1) x), '[]'),
   'app_events', coalesce((select json_agg(x order by x.occurred_at) from (
     select name, occurred_at, platform, app_version, country, properties
     from public.analytics_events where user_id = $1) x), '[]')
@@ -76,6 +85,19 @@ export class AccountRepository {
   }
 
   /** Storage keys of every photo the person still has, so they can be removed before the rows that point at them. */
+  /** Objects in the user-media bucket that belong to the person (profile photo, consultation note photos). */
+  async mediaKeys(userId: string): Promise<string[]> {
+    const rows = await this.database.query<{ key: string | null }>(
+      `select avatar_object_key as key from public.user_profiles where user_id = $1
+       union all
+       select photo_object_key from public.consultation_notes where user_id = $1
+       union all
+       select doctor_photo_object_key from public.consultation_notes where user_id = $1`,
+      [userId],
+    );
+    return rows.map(row => row.key).filter((key): key is string => !!key);
+  }
+
   async photoKeys(userId: string): Promise<string[]> {
     const rows = await this.database.query<{ object_key: string }>(
       `

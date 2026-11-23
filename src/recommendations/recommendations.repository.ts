@@ -11,10 +11,14 @@ export interface SetRow extends QueryResultRow {
   limitations: string[];
   summary: string | null;
   budget_ceiling: string | null;
+  safety: { refer_to_professional: boolean; reason: string | null } | null;
 }
 
 /** A product to save in a plan: rule-based picks have no explanation, AI picks may. */
-export type PlanItem = Pick<RankedProduct, 'id' | 'variant_id' | 'rank' | 'currency_code' | 'amount' | 'reason_codes'> & { explanation?: string | null };
+export type PlanItem = Pick<RankedProduct, 'id' | 'variant_id' | 'rank' | 'currency_code' | 'amount' | 'reason_codes'> & {
+  explanation?: string | null;
+  guidance?: { periods: string[]; frequency: string | null; cautions: string[] } | null;
+};
 
 export interface AiRunRecord {
   userId: string;
@@ -31,7 +35,7 @@ export interface AiRunRecord {
   errorCode: string | null;
 }
 
-const SET_COLUMNS = 'id, basis::text as basis, rule_version, limitations, summary, budget_ceiling::text as budget_ceiling';
+const SET_COLUMNS = 'id, basis::text as basis, rule_version, limitations, summary, budget_ceiling::text as budget_ceiling, safety';
 
 export interface ItemRow extends QueryResultRow {
   product_id: string;
@@ -44,6 +48,7 @@ export interface ItemRow extends QueryResultRow {
   amount: string;
   reason_codes: string[];
   explanation: string | null;
+  guidance: { periods: string[]; frequency: string | null; cautions: string[] } | null;
   tier: 'budget' | 'best';
 }
 
@@ -158,7 +163,7 @@ export class RecommendationsRepository {
   items(setId: string): Promise<ItemRow[]> {
     return this.database.query<ItemRow>(
       `select i.product_id, i.variant_id, i.rank, p.name, b.name as brand, p.category_code,
-              i.currency_code, i.amount::text as amount, i.reason_codes, i.explanation, i.tier
+              i.currency_code, i.amount::text as amount, i.reason_codes, i.explanation, i.guidance, i.tier
        from public.recommendation_items i
        join public.products p on p.id = i.product_id
        join public.brands b on b.id = p.brand_id
@@ -177,17 +182,18 @@ export class RecommendationsRepository {
     basis: 'self_reported' | 'ai_assisted';
     ruleVersion: string;
     summary: string | null;
+    safety?: { refer_to_professional: boolean; reason: string | null } | null;
     plan: { products: PlanItem[]; best: PlanItem[]; budget_ceiling: number | null; limitations: string[] };
     steps: RoutineStepDraft[];
   }): Promise<SetRow | null> {
     return this.database.transaction(async (db) => {
       const created = await db.query<SetRow>(
         `insert into public.recommendation_sets
-           (user_id, submission_id, basis, rule_version, market_code, idempotency_key, limitations, summary, budget_ceiling)
-         values ($1, $2, $3::public.recommendation_basis, $4, $5, $6, $7, $8, $9)
+           (user_id, submission_id, basis, rule_version, market_code, idempotency_key, limitations, summary, budget_ceiling, safety)
+         values ($1, $2, $3::public.recommendation_basis, $4, $5, $6, $7, $8, $9, $10::jsonb)
          on conflict do nothing
          returning ${SET_COLUMNS}`,
-        [input.userId, input.submissionId, input.basis, input.ruleVersion.slice(0, 32), input.market, input.idempotencyKey, input.plan.limitations, input.summary, input.plan.budget_ceiling],
+        [input.userId, input.submissionId, input.basis, input.ruleVersion.slice(0, 32), input.market, input.idempotencyKey, input.plan.limitations, input.summary, input.plan.budget_ceiling, input.safety ? JSON.stringify(input.safety) : null],
       );
       const set = created[0];
       if (!set) {
@@ -200,9 +206,9 @@ export class RecommendationsRepository {
       for (const { product, tier } of tiers) {
         await db.query(
           `insert into public.recommendation_items
-             (recommendation_set_id, product_id, variant_id, rank, currency_code, amount, reason_codes, explanation, tier)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [set.id, product.id, product.variant_id, product.rank, product.currency_code, product.amount, product.reason_codes, product.explanation ?? null, tier],
+             (recommendation_set_id, product_id, variant_id, rank, currency_code, amount, reason_codes, explanation, tier, guidance)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)`,
+          [set.id, product.id, product.variant_id, product.rank, product.currency_code, product.amount, product.reason_codes, product.explanation ?? null, tier, product.guidance ? JSON.stringify(product.guidance) : null],
         );
       }
       await db.query(

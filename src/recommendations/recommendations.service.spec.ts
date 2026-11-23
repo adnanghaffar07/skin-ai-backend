@@ -81,14 +81,14 @@ describe('RecommendationsService.create with the AI service', () => {
     external_id: id, retailer: { name: 'Target', domain: 'target.com' }, url: `https://target.com/${id}`, name: id, brand: 'B',
     category: 'cleansers', price: { amount: '100.00', currency: 'USD' }, compare_at_price: null, in_stock: true,
     checked_at: new Date().toISOString(), image_url: null, ingredients: ['Aqua'], description: null, how_to_use: null,
-    cautions: null, concern_codes: [], reason: 'Gentle for dry skin.', reason_codes: [],
+    cautions: null, concern_codes: [], reason: 'Gentle for dry skin.', reason_codes: [], routine: null, person_cautions: [],
   });
   const savedRow = (id: string, over: Partial<SavedProduct> = {}): SavedProduct => ({
     key: `target.com|${id}`, product_id: `p-${id}`, variant_id: `v-${id}`, name: id, brand: 'B', category_code: 'cleansers',
     amount: '108.50', currency_code: 'USD', in_stock: true, restriction_codes: [], ...over,
   });
   const result = (products: AiProduct[]): AiResult => ({
-    response: { schema_version: '1.0', model_version: 'm1', confidence: 'medium', summary: 'S', limitations: ['From AI'], products },
+    response: { schema_version: '1.0', model_version: 'm1', confidence: 'medium', summary: 'S', limitations: ['From AI'], products, safety: { refer_to_professional: false, reason: null } },
     dropped: [],
     latencyMs: 12,
   });
@@ -153,7 +153,7 @@ describe('RecommendationsService.create with the AI service', () => {
 });
 
 describe('budgetSummary', () => {
-  const item = (category_code: string, amount: string) => ({ product_id: category_code, variant_id: 'v', rank: 1, name: 'n', brand: 'b', category_code, currency_code: 'USD', amount, reason_codes: [], explanation: null, tier: 'budget' as const });
+  const item = (category_code: string, amount: string) => ({ product_id: category_code, variant_id: 'v', rank: 1, name: 'n', brand: 'b', category_code, currency_code: 'USD', amount, reason_codes: [], explanation: null, guidance: null, tier: 'budget' as const });
 
   it('totals the routine and the best routine against the ceiling', () => {
     const summary = budgetSummary('50.00', [item('cleansers', '10.85'), item('cleansers', '9.00'), item('moisturizers', '16.28')], [item('cleansers', '32.55'), item('moisturizers', '43.40')]);

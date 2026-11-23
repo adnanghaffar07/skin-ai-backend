@@ -41,6 +41,8 @@ export class RecommendedProductDto {
   @ApiProperty({ type: [String], example: ['category:cleansers', 'concern:dryness_dehydration'] })
   reason_codes!: string[];
   @ApiProperty({ type: String, nullable: true, example: null }) explanation!: string | null;
+  @ApiProperty({ type: Object, nullable: true, description: 'From the AI service: { periods: ["morning"|"evening"], frequency: "daily"|"alternate_days"|"2_3_per_week"|"weekly"|null, cautions: string[] }.' })
+  guidance!: { periods: string[]; frequency: string | null; cautions: string[] } | null;
 }
 
 export class BudgetSummaryDto {
@@ -63,6 +65,8 @@ export class RecommendationDto {
   @ApiProperty({ type: [String], example: [] }) limitations!: string[];
   @ApiProperty({ type: String, nullable: true, description: 'One-line summary from the AI service; null for rule-based plans.' })
   summary!: string | null;
+  @ApiProperty({ type: Object, nullable: true, description: 'Set when the AI service advises seeing a professional: { refer_to_professional: true, reason }. Show the advice above the products.' })
+  safety!: { refer_to_professional: boolean; reason: string | null } | null;
   @ApiProperty({ enum: ['ai', 'not_implemented'], description: "'ai' when products carry the AI service's explanation." })
   explanation_status!: 'ai' | 'not_implemented';
   @ApiProperty({ example: 'Calm and protect' }) morning_title!: string;

@@ -21,6 +21,10 @@ export class UnconfiguredStorage extends ObjectStorage {
     return this.fail();
   }
 
+  createSignedDownload(): never {
+    return this.fail();
+  }
+
   private fail(): never {
     throw new ApiException(
       503,

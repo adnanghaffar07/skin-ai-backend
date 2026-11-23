@@ -1,10 +1,14 @@
 import { toCents } from '../pricing/pricing.js';
 import {
   AI_CATEGORIES,
+  AI_FREQUENCIES,
   type AiCategory,
   type AiConfidence,
+  type AiFrequency,
   type AiProduct,
   type AiRecommendResponse,
+  type AiRoutine,
+  type AiSafety,
   type DroppedProduct,
 } from './ai.types.js';
 
@@ -118,7 +122,30 @@ function product(raw: unknown, currency: string, now: Date): AiProduct | string 
     concern_codes: strings(raw.concern_codes, 64),
     reason: text(raw.reason, 300),
     reason_codes: strings(raw.reason_codes, 64),
+    routine: routine(raw.routine),
+    person_cautions: strings(raw.person_cautions, 300).slice(0, 5),
   };
+}
+
+/** The product's routine guidance, or null when it is missing or makes no sense (no part of the day). */
+function routine(raw: unknown): AiRoutine | null {
+  if (!isObject(raw)) {
+    return null;
+  }
+  const periods = Array.isArray(raw.periods) ? [...new Set(raw.periods.filter((p): p is 'morning' | 'evening' => p === 'morning' || p === 'evening'))] : [];
+  if (!periods.length) {
+    return null;
+  }
+  const frequency = AI_FREQUENCIES.includes(raw.frequency as AiFrequency) ? (raw.frequency as AiFrequency) : null;
+  return { periods, frequency };
+}
+
+/** Contract 4c. Anything but an explicit true means no referral. */
+function safety(raw: unknown): AiSafety {
+  if (!isObject(raw) || raw.refer_to_professional !== true) {
+    return { refer_to_professional: false, reason: null };
+  }
+  return { refer_to_professional: true, reason: text(raw.reason, 300) };
 }
 
 const CONFIDENCE: AiConfidence[] = ['high', 'medium', 'low'];
@@ -170,6 +197,7 @@ export function parseAiResponse(
         ]),
       ].slice(0, 10),
       products: kept,
+      safety: safety(body.safety),
     },
     dropped,
   };

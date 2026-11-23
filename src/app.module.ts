@@ -18,6 +18,11 @@ import { DashboardModule } from './dashboard/dashboard.module.js';
 import { AnalyticsModule } from './analytics/analytics.js';
 import { EmailModule } from './email/email.module.js';
 import { AuthPagesModule } from './auth-pages/auth-pages.controller.js';
+import { LegalPagesModule } from './legal/legal-pages.controller.js';
+import { ReviewsModule } from './reviews/reviews.js';
+import { SavedListsModule } from './saved-lists/saved-lists.js';
+import { CareModule } from './care/care.js';
+import { ScanResultsModule } from './scan-results/scan-results.js';
 import { DiaryModule } from './diary/diary.module.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { RecommendationsModule } from './recommendations/recommendations.module.js';
@@ -48,6 +53,11 @@ import { UsersModule } from './users/users.module.js';
     OrdersModule,
     DiaryModule,
     AuthPagesModule,
+    LegalPagesModule,
+    ScanResultsModule,
+    ReviewsModule,
+    SavedListsModule,
+    CareModule,
     AnalyticsModule,
     EmailModule,
     RoutinesModule,

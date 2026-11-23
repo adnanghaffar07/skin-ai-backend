@@ -28,4 +28,9 @@ export abstract class ObjectStorage {
   abstract createSignedUpload(request: SignedUploadRequest): Promise<SignedUpload>;
   abstract head(key: string): Promise<ObjectHead | null>;
   abstract delete(key: string): Promise<void>;
+  /** A link that shows the object for `expiresInSeconds`, for pictures the person may see (a profile photo). */
+  abstract createSignedDownload(key: string, expiresInSeconds: number): Promise<string>;
 }
+
+/** The private user-media bucket: profile photos and other pictures people add. Same provider as ObjectStorage. */
+export abstract class MediaStorage extends ObjectStorage {}

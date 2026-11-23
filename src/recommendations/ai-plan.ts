@@ -93,6 +93,23 @@ export function toAiRequest(
 export interface AiPlanProduct extends RankedProduct {
   /** The AI service's "why it's picked" sentence. */
   explanation: string | null;
+  /** Morning/evening, how often and cautions, from the AI service; null when it gave none. */
+  guidance: PlanGuidance | null;
+}
+
+export interface PlanGuidance {
+  periods: ('morning' | 'evening')[];
+  frequency: string | null;
+  cautions: string[];
+}
+
+/** The AI's routine advice for a product, with the product's own caution first and the person's after it. */
+export function guidanceOf(product: AiProduct): PlanGuidance | null {
+  const cautions = [...(product.cautions ? [product.cautions] : []), ...product.person_cautions];
+  if (!product.routine && !cautions.length) {
+    return null;
+  }
+  return { periods: product.routine?.periods ?? [], frequency: product.routine?.frequency ?? null, cautions };
 }
 
 export interface AiPlan extends Plan {
@@ -146,6 +163,7 @@ export function planFromAi(found: AiProduct[], saved: SavedProduct[], profile: P
       score: 0,
       reason_codes: ['source:ai', ...product.reason_codes],
       explanation: product.reason,
+      guidance: guidanceOf(product),
     });
   }
   for (const category of wantedCategories(profile.categories)) {

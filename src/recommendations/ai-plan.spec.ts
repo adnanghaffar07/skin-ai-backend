@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AiProduct } from '../ai/ai.types.js';
 import type { SavedProduct } from '../ai/product-intake.repository.js';
-import { cleanScan, planFromAi, routineProducts, toAiRequest } from './ai-plan.js';
+import { guidanceOf, cleanScan, planFromAi, routineProducts, toAiRequest } from './ai-plan.js';
 import type { ProfileContext } from './recommendations.repository.js';
 
 const profile = (over: Partial<ProfileContext> = {}): ProfileContext => ({
@@ -42,6 +42,8 @@ const ai = (id: string, category = 'cleansers', reason: string | null = `Why ${i
   concern_codes: [],
   reason,
   reason_codes: ['concern:dryness_dehydration'],
+  routine: null,
+  person_cautions: [],
 });
 
 const saved = (id: string, over: Partial<SavedProduct> = {}): SavedProduct => ({
@@ -197,5 +199,18 @@ describe('cleanScan', () => {
     expect(toAiRequest(profile(), 'US', 'USD', 'r1', cleanScan(sent, now)).scan).toBeNull();
     expect(toAiRequest(profile(), 'US', 'USD', 'r1').scan).toBeNull();
     expect(toAiRequest(profile(), 'US', 'USD', 'r1').schema_version).toBe('1.1');
+  });
+});
+
+describe('guidanceOf', () => {
+  it('passes the AI routine advice through with the product caution before the personal ones', () => {
+    expect(guidanceOf({ ...ai('x'), routine: { periods: ['evening'], frequency: '2_3_per_week' }, cautions: 'Use SPF.', person_cautions: ['Contains fragrance.'] })).toEqual({
+      periods: ['evening'],
+      frequency: '2_3_per_week',
+      cautions: ['Use SPF.', 'Contains fragrance.'],
+    });
+  });
+  it('is null when the AI gave no advice', () => {
+    expect(guidanceOf(ai('x'))).toBeNull();
   });
 });

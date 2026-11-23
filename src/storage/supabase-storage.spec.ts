@@ -19,6 +19,16 @@ describe('SupabaseStorage', () => {
     });
   });
 
+  it('signs a viewing link in the bucket it was made for (user-media)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ signedURL: '/object/sign/user-media/users/u/avatar-1.jpg?token=t' }));
+    const storage = new SupabaseStorage('https://p.supabase.co', 'sb_secret_x', fetchImpl, 'user-media');
+    expect(await storage.createSignedDownload('users/u/avatar-1.jpg', 3600)).toBe(
+      'https://p.supabase.co/storage/v1/object/sign/user-media/users/u/avatar-1.jpg?token=t',
+    );
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://p.supabase.co/storage/v1/object/sign/user-media/users/u/avatar-1.jpg');
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ expiresIn: 3600 });
+  });
+
   it('sends an older service_role key as a bearer token too', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok([]));
     await new SupabaseStorage('https://p.supabase.co', 'eyJabc', fetchImpl).head('scans/u/s/n.jpg');

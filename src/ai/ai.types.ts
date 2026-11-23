@@ -62,6 +62,23 @@ export interface AiProduct {
   concern_codes: string[];
   reason: string | null;
   reason_codes: string[];
+  /** Morning/evening and how often (contract 4b); null when the AI did not say. */
+  routine: AiRoutine | null;
+  /** Cautions for this person (contract 4b), e.g. "Contains fragrance; you said fragrance stings." */
+  person_cautions: string[];
+}
+
+export const AI_FREQUENCIES = ['daily', 'alternate_days', '2_3_per_week', 'weekly'] as const;
+export type AiFrequency = (typeof AI_FREQUENCIES)[number];
+export interface AiRoutine {
+  periods: ('morning' | 'evening')[];
+  frequency: AiFrequency | null;
+}
+
+/** Contract 4c: when true, Clara shows advice to see a professional above the products. */
+export interface AiSafety {
+  refer_to_professional: boolean;
+  reason: string | null;
 }
 
 export type AiConfidence = 'high' | 'medium' | 'low';
@@ -73,6 +90,7 @@ export interface AiRecommendResponse {
   summary: string | null;
   limitations: string[];
   products: AiProduct[];
+  safety: AiSafety;
 }
 
 /** A product the response contained but Clara did not keep, and why. */

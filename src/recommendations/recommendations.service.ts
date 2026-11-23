@@ -50,12 +50,13 @@ export function budgetSummary(ceiling: string | null, inBudget: ItemRow[], best:
 /** The currency the AI service is asked to price in, per market. A market not listed here uses Clara's own rules. */
 const MARKET_CURRENCY: Record<string, string> = { US: 'USD' };
 
-type PlanProduct = RankedProduct & { explanation?: string | null };
+type PlanProduct = RankedProduct & { explanation?: string | null; guidance?: { periods: string[]; frequency: string | null; cautions: string[] } | null };
 
 interface BuiltPlan {
   basis: 'self_reported' | 'ai_assisted';
   ruleVersion: string;
   summary: string | null;
+  safety?: { refer_to_professional: boolean; reason: string | null } | null;
   plan: { products: PlanProduct[]; best: PlanProduct[]; budget_ceiling: number | null; limitations: string[] };
   /** Present when the AI service was called. */
   run?: Omit<AiRunRecord, 'userId' | 'submissionId' | 'setId'>;
@@ -124,6 +125,7 @@ export class RecommendationsService {
       basis: built.basis,
       ruleVersion: built.ruleVersion,
       summary: built.summary,
+      safety: built.safety ?? null,
       plan: built.plan,
       steps: buildRoutineSteps(routineProducts(built.plan.products), profile.routine_level),
     });
@@ -182,6 +184,7 @@ export class RecommendationsService {
         basis: 'ai_assisted',
         ruleVersion: `ai:${result.response.model_version ?? provider}`,
         summary: result.response.summary,
+        safety: result.response.safety,
         // Clara's codes first, then the AI service's own sentences.
         plan: { ...plan, limitations: [...plan.limitations, ...result.response.limitations] },
         run,
@@ -220,6 +223,7 @@ export class RecommendationsService {
       amount: item.amount,
       reason_codes: item.reason_codes,
       explanation: item.explanation,
+      guidance: item.guidance ?? null,
     });
     const inBudget = items.filter((item) => item.tier !== 'best');
     const best = items.filter((item) => item.tier === 'best');
@@ -229,6 +233,7 @@ export class RecommendationsService {
       rule_version: set.rule_version,
       limitations: set.limitations,
       summary: set.summary,
+      safety: set.safety?.refer_to_professional ? set.safety : null,
       explanation_status: set.basis === 'ai_assisted' ? 'ai' : 'not_implemented',
       morning_title: MORNING_TITLE,
       evening_title: EVENING_TITLE,

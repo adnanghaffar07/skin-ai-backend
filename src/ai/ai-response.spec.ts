@@ -53,6 +53,24 @@ describe('parseAiResponse', () => {
     expect(dropped).toEqual([{ index: 0, external_id: 'A-1', reason }]);
   });
 
+  it('reads routine advice, personal cautions and the safety flag (contract 4b, 4c)', () => {
+    const { response } = parseAiResponse(
+      body([item({ routine: { periods: ['evening', 'noon'], frequency: '2_3_per_week' }, person_cautions: ['Contains fragrance.'] })], {
+        safety: { refer_to_professional: true, reason: 'You described swelling after a product.' },
+      }),
+      'USD',
+      now,
+    );
+    expect(response.products[0]).toMatchObject({ routine: { periods: ['evening'], frequency: '2_3_per_week' }, person_cautions: ['Contains fragrance.'] });
+    expect(response.safety).toEqual({ refer_to_professional: true, reason: 'You described swelling after a product.' });
+  });
+
+  it('treats missing or unclear safety and routine fields as none', () => {
+    const { response } = parseAiResponse(body([item({ routine: { periods: [], frequency: 'hourly' } })], { safety: { refer_to_professional: 'yes' } }), 'USD', now);
+    expect(response.products[0].routine).toBeNull();
+    expect(response.safety).toEqual({ refer_to_professional: false, reason: null });
+  });
+
   it('drops the second copy of the same store product', () => {
     const { response, dropped } = parseAiResponse(body([item(), item({ name: 'Copy' })]), 'USD', now);
     expect(response.products).toHaveLength(1);
