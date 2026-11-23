@@ -22,8 +22,11 @@ export interface StepRow extends QueryResultRow {
 export class RoutinesRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  /** Steps of the active routine with today's completion flag (database date, UTC). */
-  currentSteps(userId: string): Promise<StepRow[]> {
+  /**
+   * Steps of the active routine with the completion flag for `day` (YYYY-MM-DD, the person's own calendar day), or for
+   * the database's today (UTC) when no day is given.
+   */
+  currentSteps(userId: string, day: string | null = null): Promise<StepRow[]> {
     return this.database.query<StepRow>(
       `
       select r.id as routine_id, r.routine_date::text as routine_date,
@@ -32,7 +35,7 @@ export class RoutinesRepository {
              s.duration_label, s.amount_label, s.instruction,
              exists (
                select 1 from public.routine_step_completions c
-               where c.step_id = s.id and c.completed_on = current_date
+               where c.step_id = s.id and c.completed_on = coalesce($2::date, current_date)
              ) as completed
       from public.skincare_routines r
       left join public.skincare_routine_steps s on s.routine_id = r.id
@@ -40,7 +43,7 @@ export class RoutinesRepository {
       where r.user_id = $1 and r.status = 'active'
       order by s.period, s.position
       `,
-      [userId],
+      [userId, day],
     );
   }
 
@@ -55,12 +58,20 @@ export class RoutinesRepository {
     return rows.length > 0;
   }
 
-  async complete(userId: string, stepId: string): Promise<void> {
+  async complete(userId: string, stepId: string, day: string | null = null): Promise<void> {
     await this.database.query(
       `insert into public.routine_step_completions (step_id, user_id, completed_on)
-       values ($1, $2, current_date)
+       values ($1, $2, coalesce($3::date, current_date))
        on conflict (step_id, completed_on) do nothing`,
-      [stepId, userId],
+      [stepId, userId, day],
+    );
+  }
+
+  async uncomplete(userId: string, stepId: string, day: string | null = null): Promise<void> {
+    await this.database.query(
+      `delete from public.routine_step_completions
+       where step_id = $1 and user_id = $2 and completed_on = coalesce($3::date, current_date)`,
+      [stepId, userId, day],
     );
   }
 }

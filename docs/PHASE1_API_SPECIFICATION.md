@@ -341,9 +341,17 @@ SPF is included in the morning template when `current_routine_level` is `cleanse
 
 Product names come from the catalog. The names on the Figma routine frame are samples until those products are seeded.
 
+All three routine routes take an optional `?date=YYYY-MM-DD`: the person's own calendar day, so a step ticked at 9 pm in the US counts for that day, not the next UTC day. It may be up to a day ahead of the server and a year back; without it the server's today (UTC) is used. On `GET`, `completed` and `completed_count` are for that day.
+
 ### `POST /api/v1/routines/current/steps/:stepId/complete`
 
-**Mark as complete** for today. Idempotent per step and date. Returns the updated counts.
+**Mark as complete** for the day. Idempotent per step and date. Returns the updated counts for that day.
+
+### `DELETE /api/v1/routines/current/steps/:stepId/complete`
+
+Undo a tick for the day. Idempotent: undoing a step that was not done changes nothing. Returns the updated counts for that day.
+
+The app keeps its own routine steps (fitted to the budget) and matches them to these steps by morning/evening and `step_type` (see `skin-app/src/api/routineSync.ts`). Ticks made offline or as a guest are sent after sign-in.
 
 ## Catalog
 
