@@ -24,6 +24,7 @@ import { SavedListsModule } from './saved-lists/saved-lists.js';
 import { CareModule } from './care/care.js';
 import { ShelfModule } from './shelf/shelf.js';
 import { RetentionModule } from './retention/retention.js';
+import { AlertsModule } from './alerts/alerts.js';
 import { ScanResultsModule } from './scan-results/scan-results.js';
 import { DiaryModule } from './diary/diary.module.js';
 import { OrdersModule } from './orders/orders.module.js';
@@ -62,6 +63,7 @@ import { UsersModule } from './users/users.module.js';
     CareModule,
     ShelfModule,
     RetentionModule,
+    AlertsModule,
     AnalyticsModule,
     EmailModule,
     RoutinesModule,

@@ -6,7 +6,7 @@
   ],
   "crons": [
     {
-      "path": "/api/v1/cron/retention",
+      "path": "/api/v1/cron/daily",
       "schedule": "0 3 * * *"
     }
   ]

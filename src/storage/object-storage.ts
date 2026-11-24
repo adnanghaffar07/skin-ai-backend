@@ -34,3 +34,10 @@ export abstract class ObjectStorage {
 
 /** The private user-media bucket: profile photos and other pictures people add. Same provider as ObjectStorage. */
 export abstract class MediaStorage extends ObjectStorage {}
+
+/** The public product-images bucket: catalogue photos copied from brand sites. Written only by the API. */
+export abstract class ProductImageStorage {
+  abstract readonly bucket: string;
+  abstract upload(key: string, body: ArrayBuffer, contentType: string): Promise<void>;
+  abstract publicUrl(key: string): string;
+}

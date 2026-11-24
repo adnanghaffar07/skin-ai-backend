@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
+import { AlertsService } from './alerts/alerts.js';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware.js';
 import { createRateLimiter } from './common/security/rate-limit.middleware.js';
 import { securityHeaders } from './common/security/security-headers.middleware.js';
@@ -50,7 +51,7 @@ export function configureApp(app: INestApplication): void {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
-  app.useGlobalFilters(new AllExceptionsFilter());
+  app.useGlobalFilters(new AllExceptionsFilter(app.get(AlertsService, { strict: false })));
 
   const swagger = new DocumentBuilder()
     .setTitle('Clara Skin API')

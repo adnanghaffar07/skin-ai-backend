@@ -18,9 +18,17 @@ export interface ApiErrorBody {
   requestId: string;
 }
 
+/** Told about failures so they can be alerted on (AlertsService); optional so tests can make the filter alone. */
+export interface FailureListener {
+  serverError(info: { method: string; path: string; status: number; requestId: string; message: string }): Promise<void>;
+  authFailure(): Promise<void>;
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('Exceptions');
+
+  constructor(private readonly listener?: FailureListener) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
@@ -30,10 +38,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const body = toErrorBody(exception, requestId);
     if (body.statusCode >= 500) {
+      const message = exception instanceof Error ? exception.message : 'unknown error';
       // Method, path without query, request id and message only. No body, headers or token.
-      this.logger.error(
-        `${request.method} ${request.path} ${body.statusCode} ${requestId}: ${exception instanceof Error ? exception.message : 'unknown error'}`,
-      );
+      this.logger.error(`${request.method} ${request.path} ${body.statusCode} ${requestId}: ${message}`);
+      void this.listener?.serverError({ method: request.method, path: request.path, status: body.statusCode, requestId, message });
+    } else if (body.statusCode === 401) {
+      void this.listener?.authFailure();
     }
     response.status(body.statusCode).json(body);
   }

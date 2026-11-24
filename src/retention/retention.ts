@@ -7,6 +7,9 @@ import { ErrorCode } from '../common/filters/error-codes.js';
 import { ApiException } from '../common/http/api.exception.js';
 import { DatabaseService } from '../database/database.service.js';
 import { ObjectStorage } from '../storage/object-storage.js';
+import { AlertsService } from '../alerts/alerts.js';
+import { CatalogModule } from '../catalog/catalog.module.js';
+import { ProductImagesService } from '../catalog/product-images.js';
 
 /**
  * Automatic deletion after a retention period (compliance plan: "Nothing deletes old photos or scans today").
@@ -14,7 +17,8 @@ import { ObjectStorage } from '../storage/object-storage.js';
  *   RETENTION_PHOTO_DAYS  training photos (scan-photos bucket) and their records
  *   RETENTION_SCAN_DAYS   scan readings synced from the app (scan_results)
  *   RETENTION_LOG_DAYS    audit log and app analytics events
- * Vercel Cron calls GET /api/v1/cron/retention once a day with "Authorization: Bearer <CRON_SECRET>".
+ * Vercel Cron calls GET /api/v1/cron/daily once a day with "Authorization: Bearer <CRON_SECRET>". The same daily job copies
+ * new product photos into Clara storage and emails the daily check (AlertsService).
  */
 export type RetentionSettings = { photoDays?: number; scanDays?: number; logDays?: number };
 export type RetentionResult = { photos: number; photo_files_failed: number; scan_results: number; audit_events: number; analytics_events: number; skipped: string[] };
@@ -101,11 +105,14 @@ export class RetentionController {
   constructor(
     private readonly retention: RetentionService,
     private readonly config: ConfigService,
+    private readonly images: ProductImagesService,
+    private readonly alerts: AlertsService,
   ) {}
 
-  @Get('retention')
+  /** The once-a-day job: retention, then product photos, then the daily check email. One part failing does not stop the rest. */
+  @Get('daily')
   @HttpCode(200)
-  async run(@Headers('authorization') authorization: string | undefined): Promise<RetentionResult> {
+  async run(@Headers('authorization') authorization: string | undefined): Promise<Record<string, unknown>> {
     const secret = this.config.get<string>('CRON_SECRET');
     // Without a secret the job is off, and the route looks like it does not exist.
     if (!secret) {
@@ -114,11 +121,23 @@ export class RetentionController {
     if (!sameSecret(authorization?.replace(/^Bearer /, ''), secret)) {
       throw new ApiException(401, ErrorCode.UNAUTHENTICATED, 'Not allowed.');
     }
-    return this.retention.run(retentionSettings(key => this.config.get(key)));
+    const part = async <T>(name: string, work: () => Promise<T>): Promise<T | { error: string }> => {
+      try {
+        return await work();
+      } catch (error) {
+        return { error: `${name} failed: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    };
+    return {
+      retention: await part('retention', () => this.retention.run(retentionSettings(key => this.config.get(key)))),
+      product_images: await part('product images', () => this.images.copy(200)),
+      daily_check: await part('daily check', () => this.alerts.dailySummary()),
+    };
   }
 }
 
 @Module({
+  imports: [CatalogModule],
   controllers: [RetentionController],
   providers: [RetentionService],
 })

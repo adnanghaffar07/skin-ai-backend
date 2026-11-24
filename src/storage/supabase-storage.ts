@@ -11,6 +11,8 @@ import {
 export const SCAN_PHOTOS_BUCKET = 'scan-photos';
 /** The private bucket made by the user_media migration (profile photos). */
 export const USER_MEDIA_BUCKET = 'user-media';
+/** The public bucket made by the product_images_bucket migration (catalogue photos). */
+export const PRODUCT_IMAGES_BUCKET = 'product-images';
 
 /** Where the secret key comes from: a fixed value (SUPABASE_SECRET_KEY), or a lookup such as Supabase Vault. */
 export type SecretKeySource = string | (() => Promise<string | null>);
@@ -116,6 +118,20 @@ export class SupabaseStorage extends ObjectStorage {
       throw this.unavailable('Storage did not return a link.');
     }
     return `${this.base}${body.signedURL}`;
+  }
+
+  /** Writes an object straight from the API (replacing one with the same key). */
+  async upload(key: string, body: ArrayBuffer, contentType: string): Promise<void> {
+    await this.call(`/object/${this.bucket}/${this.path(key)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': contentType, 'x-upsert': 'true', 'Cache-Control': 'max-age=31536000' },
+      body,
+    });
+  }
+
+  /** The address anyone can load an object from, for a public bucket. */
+  publicUrl(key: string): string {
+    return `${this.base}/object/public/${this.bucket}/${this.path(key)}`;
   }
 
   private path(key: string): string {

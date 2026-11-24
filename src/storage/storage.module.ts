@@ -2,8 +2,8 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EnvironmentVariables } from '../config/env.validation.js';
 import { DatabaseService } from '../database/database.service.js';
-import { MediaStorage, ObjectStorage } from './object-storage.js';
-import { SupabaseStorage, USER_MEDIA_BUCKET } from './supabase-storage.js';
+import { MediaStorage, ObjectStorage, ProductImageStorage } from './object-storage.js';
+import { PRODUCT_IMAGES_BUCKET, SupabaseStorage, USER_MEDIA_BUCKET } from './supabase-storage.js';
 import { UnconfiguredStorage } from './unconfigured-storage.js';
 
 /**
@@ -47,7 +47,16 @@ function storageFor(config: ConfigService<EnvironmentVariables, true>, database:
       useFactory: (config: ConfigService<EnvironmentVariables, true>, database: DatabaseService): ObjectStorage =>
         storageFor(config, database, USER_MEDIA_BUCKET),
     },
+    {
+      provide: ProductImageStorage,
+      inject: [ConfigService, DatabaseService],
+      // Without storage set up at all, product photos stay on their brand-site links (nothing to copy them to).
+      useFactory: (config: ConfigService<EnvironmentVariables, true>, database: DatabaseService): ProductImageStorage | null => {
+        const storage = storageFor(config, database, PRODUCT_IMAGES_BUCKET);
+        return storage instanceof SupabaseStorage ? storage : null;
+      },
+    },
   ],
-  exports: [ObjectStorage, MediaStorage],
+  exports: [ObjectStorage, MediaStorage, ProductImageStorage],
 })
 export class StorageModule {}
