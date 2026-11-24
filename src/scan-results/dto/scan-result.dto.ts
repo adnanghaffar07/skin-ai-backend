@@ -5,7 +5,7 @@ import { ArrayMaxSize, IsArray, IsIn, IsInt, IsISO8601, IsOptional, IsString, Ma
 export const METRIC_IDS = ['redness', 'shine', 'darkCircles', 'blemishes'] as const;
 export const METRIC_LEVELS = ['none', 'mild', 'moderate', 'high', 'unavailable'] as const;
 export const PHOTO_ISSUES = [
-  'too-dark', 'too-bright', 'uneven-light', 'blurry', 'face-small', 'face-cut-off', 'face-turned', 'face-tilted', 'multiple-faces', 'face-unclear',
+  'too-dark', 'too-bright', 'uneven-light', 'tinted-light', 'blurry', 'face-small', 'face-cut-off', 'face-turned', 'face-tilted', 'multiple-faces', 'face-unclear',
 ] as const;
 
 export class MetricReadingDto {

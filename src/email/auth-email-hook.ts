@@ -69,6 +69,29 @@ const greeting = (payload: HookPayload) => {
 };
 
 /** Which emails to send for one hook call. Usually one; a secure email change needs one to each address. */
+const UNDELIVERABLE = 'That email address can’t receive email. Check it and try again.';
+
+/** The rules the app uses too: no dot at the start or end of the name and never two in a row, a real-looking domain. */
+export function isDeliverableAddress(address: string): boolean {
+  const email = address.trim();
+  const at = email.lastIndexOf('@');
+  if (at <= 0 || email.length > 254 || email.indexOf('@') !== at) {
+    return false;
+  }
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  return (
+    local.length <= 64 &&
+    /^[A-Za-z0-9_%+'-]+(\.[A-Za-z0-9_%+'-]+)*$/.test(local) &&
+    /^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/.test(domain)
+  );
+}
+
+/** Resend refused the recipient address (422 validation error about "to"), as opposed to a key or domain problem. */
+export function isRecipientError(error: EmailError): boolean {
+  return error.status === 422 && /`to`|\bto\b|recipient|email address/i.test(error.message);
+}
+
 export function hookEmails(payload: HookPayload, supabaseUrl: string): HookEmail[] {
   const { user, email_data: data } = payload;
   const link = (hash: string) => verifyUrl(supabaseUrl, hash, data.email_action_type, data.redirect_to);
@@ -239,6 +262,13 @@ export class AuthEmailHookController {
       response.status(200).json({});
       return;
     }
+    // An address no mail server would take ("a..b@x.com"): say so plainly instead of trying and failing with a 502,
+    // which Supabase would retry and then report as "too many emails".
+    const bad = emails.find(email => !isDeliverableAddress(email.to));
+    if (bad) {
+      this.logger.warn(`Email hook (${payload.email_data.email_action_type}): address refused before sending.`);
+      return fail(400, UNDELIVERABLE);
+    }
     try {
       for (const [index, email] of emails.entries()) {
         await this.email.send({
@@ -251,6 +281,10 @@ export class AuthEmailHookController {
     } catch (error) {
       const message = error instanceof EmailError ? error.message : 'Email could not be sent.';
       this.logger.error(`Email hook (${payload.email_data.email_action_type}) failed: ${message}`);
+      // Resend refusing the address itself is the person's typo, not a server fault: no 5xx, so Supabase does not retry.
+      if (error instanceof EmailError && isRecipientError(error)) {
+        return fail(400, UNDELIVERABLE);
+      }
       return fail(502, 'The email could not be sent. Please try again in a minute.');
     }
     response.status(200).json({});

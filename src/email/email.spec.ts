@@ -121,3 +121,22 @@ describe('EmailService', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('undeliverable addresses (QA: "a+1..@gmail.com" gave a 502)', () => {
+  it('refuses addresses no mail server takes', async () => {
+    const { isDeliverableAddress } = await import('./auth-email-hook.js');
+    for (const bad of ['farhan.qat123+1..@gmail.com', 'test.qat123+..2@gmail.com', '.a@x.com', 'a.@x.com', 'a@x', 'a@-x.com', 'a@@x.com', 'a b@x.com']) {
+      expect(isDeliverableAddress(bad)).toBe(false);
+    }
+    for (const good of ['farhan.qat123+1@gmail.com', 'o\'neil@example.co.uk', 'a_b-c%d@sub.example.io']) {
+      expect(isDeliverableAddress(good)).toBe(true);
+    }
+  });
+
+  it('tells a Resend address refusal apart from a set-up problem', async () => {
+    const { isRecipientError } = await import('./auth-email-hook.js');
+    const { EmailError } = await import('./email.service.js');
+    expect(isRecipientError(new EmailError('Resend 422: Invalid `to` field.', 422))).toBe(true);
+    expect(isRecipientError(new EmailError('Resend 403: The domain is not verified.', 403))).toBe(false);
+  });
+});
