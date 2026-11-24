@@ -22,7 +22,7 @@ describe('AllExceptionsFilter', () => {
   it('formats a not-found exception with the caller request id', () => {
     const { host, status, json } = createHost('req_test');
 
-    filter.catch(new HttpException('Cannot GET /missing', 404), host);
+    void filter.catch(new HttpException('Cannot GET /missing', 404), host);
 
     expect(status).toHaveBeenCalledWith(404);
     expect(json).toHaveBeenCalledWith({
@@ -45,7 +45,7 @@ describe('AllExceptionsFilter', () => {
       HttpStatus.BAD_REQUEST,
     );
 
-    filter.catch(exception, host);
+    void filter.catch(exception, host);
 
     expect(json).toHaveBeenCalledWith({
       statusCode: 400,
@@ -67,7 +67,7 @@ describe('AllExceptionsFilter', () => {
       HttpStatus.UNPROCESSABLE_ENTITY,
     );
 
-    filter.catch(exception, host);
+    void filter.catch(exception, host);
 
     expect(json).toHaveBeenCalledWith({
       statusCode: 422,
@@ -81,7 +81,7 @@ describe('AllExceptionsFilter', () => {
   it('hides unexpected errors behind a generic message', () => {
     const { host, status, json } = createHost();
 
-    filter.catch(new Error('database password leaked'), host);
+    void filter.catch(new Error('database password leaked'), host);
 
     expect(status).toHaveBeenCalledWith(500);
     const body = json.mock.calls[0][0] as { message: string; requestId: string };

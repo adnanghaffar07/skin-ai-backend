@@ -30,23 +30,47 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   constructor(private readonly listener?: FailureListener) {}
 
-  catch(exception: unknown, host: ArgumentsHost): void {
+  /**
+   * Answers with the error body. A server error or a refused token is first handed to the alert listener, and the answer
+   * waits for it (at most ALERT_WAIT_MS): on Vercel a function can be stopped as soon as it answers, which would drop the
+   * alert email.
+   */
+  catch(exception: unknown, host: ArgumentsHost): void | Promise<void> {
     const http = host.switchToHttp();
     const response = http.getResponse<Response>();
     const request = http.getRequest<Request>();
     const requestId = readRequestId(request);
 
     const body = toErrorBody(exception, requestId);
+    let alert: Promise<void> | undefined;
     if (body.statusCode >= 500) {
       const message = exception instanceof Error ? exception.message : 'unknown error';
       // Method, path without query, request id and message only. No body, headers or token.
       this.logger.error(`${request.method} ${request.path} ${body.statusCode} ${requestId}: ${message}`);
-      void this.listener?.serverError({ method: request.method, path: request.path, status: body.statusCode, requestId, message });
+      alert = this.listener?.serverError({ method: request.method, path: request.path, status: body.statusCode, requestId, message });
     } else if (body.statusCode === 401) {
-      void this.listener?.authFailure();
+      alert = this.listener?.authFailure();
     }
-    response.status(body.statusCode).json(body);
+    const answer = () => {
+      response.status(body.statusCode).json(body);
+    };
+    if (!alert) {
+      answer();
+      return;
+    }
+    return withTimeout(alert, ALERT_WAIT_MS).then(answer, answer);
   }
+}
+
+/** The longest an error answer waits for its alert to be recorded and emailed. */
+export const ALERT_WAIT_MS = 3_000;
+
+function withTimeout(work: Promise<void>, ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<void>(resolve => {
+    timer = setTimeout(resolve, ms);
+  });
+  return Promise.race([work.catch(() => undefined), timeout]).finally(() => clearTimeout(timer));
 }
 
 function readRequestId(request: Request): string {

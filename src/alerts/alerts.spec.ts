@@ -70,6 +70,18 @@ describe('alerts', () => {
 });
 
 describe('error filter alerts', () => {
+  it('answers only after the alert is done, and still answers when it hangs', async () => {
+    vi.useFakeTimers();
+    let answered = 0;
+    const slow = { serverError: () => new Promise<void>(() => undefined), authFailure: async () => undefined };
+    const result = new AllExceptionsFilter(slow).catch(new Error('boom'), host(() => (answered += 1)));
+    expect(answered).toBe(0);
+    await vi.advanceTimersByTimeAsync(3_000);
+    await result;
+    expect(answered).toBe(1);
+    vi.useRealTimers();
+  });
+
   const host = (status: (code: number) => void) =>
     ({
       switchToHttp: () => ({
@@ -78,12 +90,15 @@ describe('error filter alerts', () => {
       }),
     }) as never;
 
-  it('reports server errors and refused tokens, nothing else', () => {
+  it('reports server errors and refused tokens, nothing else', async () => {
     const listener = { serverError: vi.fn(async () => undefined), authFailure: vi.fn(async () => undefined) };
     const filter = new AllExceptionsFilter(listener);
-    filter.catch(new Error('boom'), host(() => undefined));
-    filter.catch(new ApiException(401, ErrorCode.UNAUTHENTICATED, 'no'), host(() => undefined));
-    filter.catch(new ApiException(404, ErrorCode.NOT_FOUND, 'no'), host(() => undefined));
+    let answered = 0;
+    const answer = () => (answered += 1);
+    await filter.catch(new Error('boom'), host(answer));
+    await filter.catch(new ApiException(401, ErrorCode.UNAUTHENTICATED, 'no'), host(answer));
+    void filter.catch(new ApiException(404, ErrorCode.NOT_FOUND, 'no'), host(answer));
+    expect(answered).toBe(3);
     expect(listener.serverError).toHaveBeenCalledWith(expect.objectContaining({ method: 'GET', path: '/api/v1/me', status: 500, message: 'boom' }));
     expect(listener.authFailure).toHaveBeenCalledTimes(1);
   });
