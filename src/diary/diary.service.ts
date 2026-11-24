@@ -108,6 +108,7 @@ function present(row: DiaryRow): DiaryEntryDto {
     date: row.entry_date,
     skin_feel: row.skin_feel,
     concerns: row.concerns,
+    concern_levels: row.concern_levels ?? {},
     morning_routine_done: row.morning_routine_done,
     evening_routine_done: row.evening_routine_done,
     new_products: row.new_products,

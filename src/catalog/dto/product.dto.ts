@@ -76,6 +76,14 @@ export class ProductSummaryDto {
   restriction_codes!: string[];
   @ApiProperty({ type: [String], example: ['Retinol'], description: 'INCI names of highlighted ingredients.' })
   highlighted_ingredients!: string[];
+  @ApiProperty({
+    type: Boolean,
+    nullable: true,
+    description: 'Whether a store Clara buys from has it in stock in this market. Null when Clara has no store offer on record.',
+  })
+  in_stock!: boolean | null;
+  @ApiProperty({ description: 'A paid placement. The app labels it "Sponsored" so it is not mistaken for a personal match.' })
+  sponsored!: boolean;
 }
 
 export class ProductListDto {

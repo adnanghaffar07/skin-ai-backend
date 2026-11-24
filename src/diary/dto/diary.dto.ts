@@ -7,6 +7,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -28,6 +29,8 @@ export const DIARY_CONCERNS = [
   'itching',
 ] as const;
 export const DIARY_REACTIONS = ['none', 'mild', 'severe'] as const;
+/** How bad a ticked concern was: 1 mild, 2 moderate, 3 strong. */
+export const CONCERN_LEVELS = [1, 2, 3] as const;
 export type DiaryReaction = (typeof DIARY_REACTIONS)[number];
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -55,6 +58,17 @@ export class SaveDiaryEntryDto {
   @ArrayUnique()
   @IsIn(DIARY_CONCERNS, { each: true })
   concerns?: string[];
+
+  @ApiProperty({
+    required: false,
+    type: Object,
+    additionalProperties: { type: 'integer', enum: [...CONCERN_LEVELS] },
+    example: { dryness_dehydration: 2 },
+    description: 'How bad each ticked concern was: 1 mild, 2 moderate, 3 strong. Levels for concerns not ticked are dropped.',
+  })
+  @IsOptional()
+  @IsObject()
+  concern_levels?: Record<string, number>;
 
   @ApiProperty({ required: false, nullable: true }) @IsOptional() @ValidateIf((_, v) => v !== null) @IsBoolean() morning_routine_done?: boolean | null;
   @ApiProperty({ required: false, nullable: true }) @IsOptional() @ValidateIf((_, v) => v !== null) @IsBoolean() evening_routine_done?: boolean | null;
@@ -110,6 +124,8 @@ export class DiaryEntryDto {
   @ApiProperty({ example: '2026-11-20' }) date!: string;
   @ApiProperty({ type: Number, nullable: true }) skin_feel!: number | null;
   @ApiProperty({ type: [String], enum: DIARY_CONCERNS }) concerns!: string[];
+  @ApiProperty({ type: Object, additionalProperties: { type: 'integer' }, description: 'Level per ticked concern: 1 mild, 2 moderate, 3 strong.' })
+  concern_levels!: Record<string, number>;
   @ApiProperty({ type: Boolean, nullable: true }) morning_routine_done!: boolean | null;
   @ApiProperty({ type: Boolean, nullable: true }) evening_routine_done!: boolean | null;
   @ApiProperty({ type: String, nullable: true }) new_products!: string | null;

@@ -19,6 +19,8 @@ export interface ProductRow extends QueryResultRow {
   suitable_for: string | null;
   restriction_codes: string[];
   highlighted_ingredients: string[];
+  in_stock?: boolean | null;
+  is_sponsored?: boolean;
   description?: string | null;
   how_to_use?: string | null;
   cautions?: string | null;
@@ -48,7 +50,9 @@ const SUMMARY_SELECT = `
     from public.product_ingredients pi
     join public.ingredients i on i.id = pi.ingredient_id
     where pi.product_id = p.id and pi.is_highlighted
-  ), '{}') as highlighted_ingredients
+  ), '{}') as highlighted_ingredients,
+  (select bool_or(o.in_stock) from public.product_offers o where o.product_id = p.id and o.market_code = $1) as in_stock,
+  p.is_sponsored
 `;
 
 const SUMMARY_JOINS = `

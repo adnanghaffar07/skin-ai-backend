@@ -49,6 +49,8 @@ function toSummary(row: ProductRow): Plain<ProductSummaryDto> {
     concern_codes: concernCodesOf(row),
     restriction_codes: row.restriction_codes ?? [],
     highlighted_ingredients: row.highlighted_ingredients ?? [],
+    in_stock: row.in_stock ?? null,
+    sponsored: row.is_sponsored ?? false,
   };
 }
 

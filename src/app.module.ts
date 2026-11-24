@@ -22,6 +22,8 @@ import { LegalPagesModule } from './legal/legal-pages.controller.js';
 import { ReviewsModule } from './reviews/reviews.js';
 import { SavedListsModule } from './saved-lists/saved-lists.js';
 import { CareModule } from './care/care.js';
+import { ShelfModule } from './shelf/shelf.js';
+import { RetentionModule } from './retention/retention.js';
 import { ScanResultsModule } from './scan-results/scan-results.js';
 import { DiaryModule } from './diary/diary.module.js';
 import { OrdersModule } from './orders/orders.module.js';
@@ -58,6 +60,8 @@ import { UsersModule } from './users/users.module.js';
     ReviewsModule,
     SavedListsModule,
     CareModule,
+    ShelfModule,
+    RetentionModule,
     AnalyticsModule,
     EmailModule,
     RoutinesModule,

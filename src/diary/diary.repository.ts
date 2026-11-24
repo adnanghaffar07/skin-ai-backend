@@ -7,6 +7,7 @@ export interface DiaryRow extends QueryResultRow {
   entry_date: string;
   skin_feel: number | null;
   concerns: string[];
+  concern_levels?: Record<string, number> | null;
   morning_routine_done: boolean | null;
   evening_routine_done: boolean | null;
   new_products: string | null;
@@ -16,8 +17,20 @@ export interface DiaryRow extends QueryResultRow {
   updated_at: Date;
 }
 
+/** Keeps a level (1 to 3) only for concerns ticked that day. */
+export function concernLevels(concerns: string[], levels: Record<string, number> | undefined): Record<string, number> {
+  const kept: Record<string, number> = {};
+  for (const code of concerns) {
+    const level = levels?.[code];
+    if (Number.isInteger(level) && (level as number) >= 1 && (level as number) <= 3) {
+      kept[code] = level as number;
+    }
+  }
+  return kept;
+}
+
 // entry_date goes out as text so the day never shifts with the server's time zone.
-const COLUMNS = `to_char(entry_date, 'YYYY-MM-DD') as entry_date, skin_feel, concerns, morning_routine_done,
+const COLUMNS = `to_char(entry_date, 'YYYY-MM-DD') as entry_date, skin_feel, concerns, concern_levels, morning_routine_done,
   evening_routine_done, new_products, reaction::text as reaction, reaction_note, notes, updated_at`;
 
 @Injectable()
@@ -47,11 +60,12 @@ export class DiaryRepository {
       `
       insert into public.diary_entries
         (user_id, entry_date, skin_feel, concerns, morning_routine_done, evening_routine_done,
-         new_products, reaction, reaction_note, notes)
-      values ($1, $2::date, $3, $4::text[], $5, $6, $7, $8::public.diary_reaction, $9, $10)
+         new_products, reaction, reaction_note, notes, concern_levels)
+      values ($1, $2::date, $3, $4::text[], $5, $6, $7, $8::public.diary_reaction, $9, $10, $11::jsonb)
       on conflict (user_id, entry_date) do update set
         skin_feel = excluded.skin_feel,
         concerns = excluded.concerns,
+        concern_levels = excluded.concern_levels,
         morning_routine_done = excluded.morning_routine_done,
         evening_routine_done = excluded.evening_routine_done,
         new_products = excluded.new_products,
@@ -72,6 +86,7 @@ export class DiaryRepository {
         entry.reaction ?? null,
         entry.reaction && entry.reaction !== 'none' ? (entry.reaction_note ?? null) : null,
         entry.notes ?? null,
+        JSON.stringify(concernLevels(entry.concerns ?? [], entry.concern_levels)),
       ],
     );
     return rows[0]!;

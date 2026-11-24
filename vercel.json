@@ -1,5 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nestjs",
-  "regions": ["bom1"]
+  "regions": [
+    "bom1"
+  ],
+  "crons": [
+    {
+      "path": "/api/v1/cron/retention",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }

@@ -58,7 +58,7 @@ select json_build_object(
   'progress', coalesce((select json_agg(x order by x.captured_on) from (
     select scan_id, captured_on, overall_score from public.progress_entries where user_id = $1) x), '[]'),
   'diary', coalesce((select json_agg(x order by x.entry_date) from (
-    select entry_date, skin_feel, concerns, morning_routine_done, evening_routine_done, new_products,
+    select entry_date, skin_feel, concerns, concern_levels, morning_routine_done, evening_routine_done, new_products,
       reaction, reaction_note, notes, created_at, updated_at
     from public.diary_entries where user_id = $1) x), '[]'),
   'scan_results', coalesce((select json_agg(x order by x.analysed_at) from (
@@ -68,6 +68,8 @@ select json_build_object(
   'consultation_notes', coalesce((select json_agg(x order by x.visited_on) from (
     select doctor_name, visited_on, title, notes, photo_object_key is not null as has_photo, created_at
     from public.consultation_notes where user_id = $1) x), '[]'),
+  'skincare_shelf', coalesce((select json_agg(x order by x.created_at) from (
+    select product_id, name, brand, category_code, note, created_at from public.user_shelf_items where user_id = $1) x), '[]'),
   'reviews', coalesce((select json_agg(x order by x.created_at) from (
     select product_id, rating, body, created_at, updated_at from public.product_reviews where user_id = $1) x), '[]'),
   'app_events', coalesce((select json_agg(x order by x.occurred_at) from (
