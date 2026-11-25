@@ -16,6 +16,9 @@ export interface OrderableProduct extends QueryResultRow {
   retailer_external_id: string | null;
   store_amount: string | null;
   in_stock: boolean | null;
+  /** Where the store offer came from: 'ai' offers can be rechecked live with the AI service. */
+  offer_source: string | null;
+  offer_checked_at: Date | null;
 }
 
 export interface OrderRow extends QueryResultRow {
@@ -99,7 +102,8 @@ export class OrdersRepository {
         (select m.url from public.product_media m where m.product_id = p.id order by m.position limit 1) as image_url,
         price.currency_code, price.amount::text as amount,
         offer.retailer_name, offer.url as retailer_url, offer.external_id as retailer_external_id,
-        offer.store_amount::text as store_amount, offer.in_stock
+        offer.store_amount::text as store_amount, offer.in_stock,
+        offer.source as offer_source, offer.checked_at as offer_checked_at
       from public.products p
       join public.brands b on b.id = p.brand_id
       join public.product_market_availability a on a.product_id = p.id and a.market_code = $2 and a.is_available
@@ -112,7 +116,7 @@ export class OrdersRepository {
         order by pr.amount asc limit 1
       ) price on true
       left join lateral (
-        select o.retailer_name, o.url, o.external_id, o.store_amount, o.in_stock
+        select o.retailer_name, o.url, o.external_id, o.store_amount, o.in_stock, o.source, o.checked_at
         from public.product_offers o
         where o.product_id = p.id and o.market_code = $2
         order by o.in_stock desc, o.checked_at desc limit 1

@@ -63,6 +63,8 @@ export interface ProfileContext extends ProfileInput {
   reaction_history: string | null;
   /** The optional "which product or ingredient?" text under the reactions question. */
   reaction_details: string | null;
+  /** The person's skincare shelf, newest first, for the AI service's owned_products. */
+  owned_products?: { name: string; brand: string | null; category: string | null }[];
 }
 
 @Injectable()
@@ -93,7 +95,15 @@ export class RecommendationsRepository {
         coalesce((select array_agg(concern_code) from public.skin_profile_concerns where user_id = $1), '{}') as concerns,
         coalesce((select array_agg(goal_code) from public.user_preference_goals where user_id = $1), '{}') as goal_codes,
         coalesce((select array_agg(sensitivity_code) from public.skin_profile_sensitivities where user_id = $1), '{}') as avoid_codes,
-        coalesce((select array_agg(category_code) from public.user_preference_categories where user_id = $1), '{}') as categories
+        coalesce((select array_agg(category_code) from public.user_preference_categories where user_id = $1), '{}') as categories,
+        coalesce((
+          select json_agg(json_build_object(
+            'name', s.name,
+            'brand', s.brand,
+            'category', case when s.category_code = 'other' then null else s.category_code end
+          ) order by s.created_at desc)
+          from (select * from public.user_shelf_items where user_id = $1 order by created_at desc limit 60) s
+        ), '[]'::json) as owned_products
       from (select 1) x
       left join public.skin_profiles sp on sp.user_id = $1
       left join public.user_profiles up on up.user_id = $1
@@ -113,10 +123,14 @@ export class RecommendationsRepository {
         concat_ws(' ', p.name, p.benefits, p.suitable_for) as text,
         (select count(*) from public.product_ingredients pi where pi.product_id = p.id)::int as ingredient_count,
         coalesce((
-          select array_agg(distinct r.restriction_code)
-          from public.product_ingredients pi
-          join public.ingredient_restrictions r on r.ingredient_id = pi.ingredient_id
-          where pi.product_id = p.id
+          select array_agg(distinct code) from (
+            select r.restriction_code as code
+            from public.product_ingredients pi
+            join public.ingredient_restrictions r on r.ingredient_id = pi.ingredient_id
+            where pi.product_id = p.id
+            union
+            select unnest(p.ingredient_flags)
+          ) codes
         ), '{}') as restriction_codes
       from public.products p
       join public.brands b on b.id = p.brand_id

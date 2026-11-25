@@ -5,6 +5,8 @@ import type { UsersService } from '../users/users.service.js';
 import type { CreateOrderDto } from './dto/order.dto.js';
 import type { OrderableProduct, OrderRow, OrdersRepository } from './orders.repository.js';
 import type { OrderEmailsService } from './order-emails.js';
+import type { AiRecommender } from '../ai/ai-recommender.js';
+import type { ProductIntakeRepository } from '../ai/product-intake.repository.js';
 import { OrdersService } from './orders.service.js';
 import type { StripeClient } from './stripe.js';
 
@@ -23,6 +25,8 @@ const product = (id: string, amount: string, over: Partial<OrderableProduct> = {
   retailer_external_id: id,
   store_amount: '10.00',
   in_stock: true,
+  offer_source: 'ai',
+  offer_checked_at: new Date(),
   ...over,
 });
 
@@ -70,7 +74,9 @@ const body = (over: Partial<CreateOrderDto> = {}): CreateOrderDto => ({
   ...over,
 });
 
-function build(repo: Partial<Record<keyof OrdersRepository, unknown>> = {}, stripe: Partial<StripeClient> | null = {}) {
+type Live = { checkProducts?: ReturnType<typeof vi.fn>; applyCheck?: ReturnType<typeof vi.fn> };
+
+function build(repo: Partial<Record<keyof OrdersRepository, unknown>> = {}, stripe: Partial<StripeClient> | null = {}, live: Live | null = null) {
   const repository = {
     findByIdempotencyKey: vi.fn().mockResolvedValue(null),
     loadProducts: vi.fn().mockResolvedValue([product('a', '19.52'), product('b', '11.82')]),
@@ -93,6 +99,9 @@ function build(repo: Partial<Record<keyof OrdersRepository, unknown>> = {}, stri
     config as unknown as ConfigService,
     emails as unknown as OrderEmailsService,
     client as unknown as StripeClient | null,
+    (live ? { checkProducts: live.checkProducts ?? vi.fn().mockResolvedValue(null) } : null) as unknown as AiRecommender | null,
+    (live ? { applyCheck: live.applyCheck ?? vi.fn() } : null) as unknown as ProductIntakeRepository | null,
+    live ? 850 : null,
   );
   return { service, repository, client, emails };
 }
@@ -145,6 +154,65 @@ describe('OrdersService.create', () => {
   it('answers 502 when Stripe fails, leaving the order to retry with the same key', async () => {
     const { service } = build({}, { createCheckoutSession: vi.fn().mockRejectedValue(new Error('timeout')) });
     await expect(service.create(user, 'k', body())).rejects.toMatchObject({ status: 502 });
+  });
+});
+
+describe('OrdersService.create: live price and stock check before charging', () => {
+  const ok = (external_id: string, amount: string) => ({ external_id, status: 'ok', price: { amount, currency: 'USD' }, in_stock: true, url: `https://s.com/${external_id}` });
+
+  it('charges as normal when the store price is unchanged, saving the fresh check', async () => {
+    const checkProducts = vi.fn().mockResolvedValue([ok('a', '18.00'), ok('b', '10.90')]);
+    // Clara's price after the markup is what is already saved, so nothing changed.
+    const applyCheck = vi.fn(async (id: string) => (id === 'a' ? '19.52' : '11.82'));
+    const { service, repository } = build({}, {}, { checkProducts, applyCheck });
+    await service.create(user, 'k', body());
+    expect(checkProducts).toHaveBeenCalledWith(['a', 'b'], 'US');
+    expect(applyCheck).toHaveBeenCalledWith('a', 'US', 'a', { amount: '18.00', currency: 'USD', inStock: true, url: 'https://s.com/a' }, 850);
+    expect(repository.loadProducts).toHaveBeenCalledTimes(2);
+    expect(repository.create).toHaveBeenCalled();
+  });
+
+  it('stops the order and names the product when the store changed its price', async () => {
+    const applyCheck = vi.fn(async (id: string) => (id === 'a' ? '21.70' : '11.82'));
+    const { service, repository } = build({}, {}, { checkProducts: vi.fn().mockResolvedValue([ok('a', '20.00'), ok('b', '10.90')]), applyCheck });
+    await expect(service.create(user, 'k', body())).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'PRICE_CHANGED', message: expect.stringContaining('Product a is now $21.70') },
+    });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('stops the order when the store sold out or no longer has the product, and saves it as out of stock', async () => {
+    const applyCheck = vi.fn(async () => '19.52');
+    const checks = [{ ...ok('a', '18.00'), status: 'out_of_stock', in_stock: false }];
+    const { service, repository } = build({}, {}, { checkProducts: vi.fn().mockResolvedValue(checks), applyCheck });
+    await expect(service.create(user, 'k', body())).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'PRODUCT_UNAVAILABLE', message: 'Product a and Product b just sold out at the store. Remove them from your cart to continue.' },
+    });
+    expect(applyCheck).toHaveBeenCalledWith('b', 'US', 'b', expect.objectContaining({ inStock: false }), 850);
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses to charge a price older than 10 minutes when the check cannot be done', async () => {
+    const stale = vi.fn().mockResolvedValue([product('a', '19.52', { offer_checked_at: new Date(Date.now() - 11 * 60 * 1000) })]);
+    const { service, repository } = build({ loadProducts: stale }, {}, { checkProducts: vi.fn().mockRejectedValue(new Error('502')) });
+    await expect(service.create(user, 'k', body())).rejects.toMatchObject({ status: 503, response: { code: 'PRICE_CHECK_FAILED' } });
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('uses a price checked in the last 10 minutes when the check cannot be done', async () => {
+    const { service, repository } = build({}, {}, { checkProducts: vi.fn().mockRejectedValue(new Error('502')) });
+    await service.create(user, 'k', body());
+    expect(repository.create).toHaveBeenCalled();
+  });
+
+  it('does not check products that did not come from the AI service', async () => {
+    const checkProducts = vi.fn();
+    const manual = vi.fn().mockResolvedValue([product('a', '19.52', { offer_source: 'manual' }), product('b', '11.82', { offer_source: null })]);
+    const { service } = build({ loadProducts: manual }, {}, { checkProducts });
+    await service.create(user, 'k', body());
+    expect(checkProducts).not.toHaveBeenCalled();
   });
 });
 

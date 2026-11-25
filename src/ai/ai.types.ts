@@ -18,7 +18,22 @@ export interface AiProfile {
   avoid_codes: string[];
   monthly_budget: string | null;
   product_interests: string[];
+  /** Products the person already owns (their skincare shelf), so the AI skips steps they cover (contract 1.1). */
+  owned_products?: AiOwnedProduct[];
 }
+
+/** A product on the person's shelf, as the AI service reads it. Only `name` is required. */
+export interface AiOwnedProduct {
+  name: string;
+  brand: string | null;
+  category: string | null;
+}
+
+/** Ingredients the AI flags on a product (contract 1.1). */
+export const AI_INGREDIENT_FLAGS = ['fragrance', 'retinol', 'exfoliating_acid', 'essential_oil'] as const;
+export type AiIngredientFlag = (typeof AI_INGREDIENT_FLAGS)[number];
+/** ingredient_list: from the full list, so a missing flag means absent. name_and_description: a missing flag proves nothing. */
+export type AiIngredientFlagsBasis = 'ingredient_list' | 'name_and_description';
 
 /** What the phone read from a face scan (contract section 6, option 1). The photo itself never leaves the phone. */
 export interface AiScan {
@@ -66,6 +81,18 @@ export interface AiProduct {
   routine: AiRoutine | null;
   /** Cautions for this person (contract 4b), e.g. "Contains fragrance; you said fragrance stings." */
   person_cautions: string[];
+  ingredient_flags: AiIngredientFlag[];
+  /** Null when the AI service did not say (older contract). */
+  ingredient_flags_basis: AiIngredientFlagsBasis | null;
+}
+
+/** One product from POST /v1/product-check (contract 1.1). */
+export interface AiProductCheck {
+  external_id: string;
+  status: 'ok' | 'out_of_stock' | 'not_found';
+  price: { amount: string; currency: string } | null;
+  in_stock: boolean;
+  url: string | null;
 }
 
 export const AI_FREQUENCIES = ['daily', 'alternate_days', '2_3_per_week', 'weekly'] as const;

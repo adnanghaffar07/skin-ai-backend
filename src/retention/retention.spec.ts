@@ -3,7 +3,6 @@ import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '../database/database.service.js';
 import type { ObjectStorage } from '../storage/object-storage.js';
 import type { AlertsService } from '../alerts/alerts.js';
-import type { ProductImagesService } from '../catalog/product-images.js';
 import { RetentionController, RetentionService, retentionSettings, sameSecret } from './retention.js';
 import type { OrdersService } from '../orders/orders.service.js';
 
@@ -54,17 +53,15 @@ describe('retention', () => {
 
   it('hides the route without a secret and refuses a wrong one', async () => {
     const { retention } = service();
-    const images = { copy: vi.fn(async () => ({ copied: 2, failed: 0, left: 0 })) } as unknown as ProductImagesService;
     const alerts = { dailySummary: vi.fn(async () => { throw new Error('mail down'); }) } as unknown as AlertsService;
     const orders = { syncPendingPayments: vi.fn(async () => ({ checked: 1, paid: 1, expired: 0 })) } as unknown as OrdersService;
-    const off = new RetentionController(retention, { get: () => undefined } as unknown as ConfigService, images, alerts, orders);
+    const off = new RetentionController(retention, { get: () => undefined } as unknown as ConfigService, alerts, orders);
     await expect(off.run('Bearer x')).rejects.toMatchObject({ status: 404 });
-    const on = new RetentionController(retention, { get: (key: string) => (key === 'CRON_SECRET' ? 'right' : undefined) } as unknown as ConfigService, images, alerts, orders);
+    const on = new RetentionController(retention, { get: (key: string) => (key === 'CRON_SECRET' ? 'right' : undefined) } as unknown as ConfigService, alerts, orders);
     await expect(on.run('Bearer wrong')).rejects.toMatchObject({ status: 401 });
     // Every part runs, and one failing is reported without stopping the others.
     await expect(on.run('Bearer right')).resolves.toEqual({
       retention: expect.objectContaining({ skipped: ['photos', 'scan_results', 'logs'] }),
-      product_images: { copied: 2, failed: 0, left: 0 },
       pending_payments: { checked: 1, paid: 1, expired: 0 },
       daily_check: { error: 'daily check failed: mail down' },
     });

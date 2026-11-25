@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService, type Queryable } from '../database/database.service.js';
 import { sellingPrice } from '../pricing/pricing.js';
-import type { AiProduct } from './ai.types.js';
+import type { AiIngredientFlag, AiProduct } from './ai.types.js';
 import { restrictionCodesFor, restrictionCodesForAll } from './ingredient-restrictions.js';
 
 /** A product the AI found, as saved: Clara's own ids and price. */
@@ -20,7 +20,18 @@ export interface SavedProduct {
   in_stock: boolean;
   /** Null when the ingredients are not known. */
   restriction_codes: string[] | null;
+  /** Avoid-list codes the AI flagged: known to be in the product, even when the full list is not known. */
+  flagged_codes: string[];
 }
+
+/** The AI's ingredient flags as Clara's avoid-list codes. */
+const FLAG_CODE: Record<AiIngredientFlag, string> = {
+  fragrance: 'fragrance',
+  retinol: 'retinol',
+  essential_oil: 'essential_oils',
+  exfoliating_acid: 'exfoliating_acid',
+};
+export const flagCodes = (flags: AiIngredientFlag[]) => [...new Set(flags.map((flag) => FLAG_CODE[flag]))].sort();
 
 export const productKey = (product: Pick<AiProduct, 'retailer' | 'external_id'>) => `${product.retailer.domain}|${product.external_id}`;
 
@@ -132,6 +143,19 @@ export class ProductIntakeRepository {
       restrictions = known.length ? [...new Set(known.map((row) => row.code).filter((code): code is string => !!code))].sort() : null;
     }
 
+    const flagged = flagCodes(product.ingredient_flags);
+    await db.query(`update public.products set ingredient_flags = $2, ingredient_flags_basis = $3 where id = $1`, [
+      productId,
+      flagged,
+      product.ingredient_flags_basis,
+    ]);
+    if (product.ingredient_flags_basis === 'ingredient_list') {
+      // Read from the full list: what is not flagged is not there.
+      restrictions = [...new Set([...(restrictions ?? []), ...flagged])].sort();
+    } else if (restrictions !== null) {
+      restrictions = [...new Set([...restrictions, ...flagged])].sort();
+    }
+
     await db.query(
       `insert into public.product_offers
          (product_id, market_code, retailer_name, retailer_domain, external_id, url, store_currency_code,
@@ -160,7 +184,43 @@ export class ProductIntakeRepository {
       currency_code: product.price.currency,
       in_stock: product.in_stock,
       restriction_codes: restrictions,
+      flagged_codes: flagged,
     };
+  }
+
+  /**
+   * Records a live price and stock check from the AI service (POST /v1/product-check) for one store offer: the store
+   * price, stock and link, and Clara's price (store price plus markup) when it changed. Returns Clara's new price.
+   */
+  applyCheck(
+    productId: string,
+    market: string,
+    externalId: string,
+    check: { amount: string; currency: string; inStock: boolean; url: string | null },
+    markupBp: number,
+  ): Promise<string> {
+    return this.database.transaction(async (db) => {
+      await db.query(
+        `update public.product_offers
+         set store_amount = $4, store_currency_code = $5, in_stock = $6, url = coalesce($7, url), markup_bp = $8, checked_at = now()
+         where product_id = $1 and market_code = $2 and external_id = $3`,
+        [productId, market, externalId, check.amount, check.currency, check.inStock, check.url, markupBp],
+      );
+      const amount = sellingPrice(check.amount, markupBp);
+      const variants = await db.query<{ id: string }>(
+        `select id from public.product_variants where product_id = $1 and status = 'active' order by created_at limit 1`,
+        [productId],
+      );
+      if (variants[0]) {
+        const current = await db.query<{ compare_at_amount: string | null }>(
+          `select compare_at_amount::text from public.product_prices
+           where variant_id = $1 and market_code = $2 and effective_to is null limit 1`,
+          [variants[0].id, market],
+        );
+        await this.setPrice(db, variants[0].id, market, check.currency, amount, current[0]?.compare_at_amount ?? null);
+      }
+      return amount;
+    });
   }
 
   /** Closes the current price and starts a new one only when it changed, so price history is kept. */

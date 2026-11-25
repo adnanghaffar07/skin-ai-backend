@@ -82,10 +82,11 @@ describe('RecommendationsService.create with the AI service', () => {
     category: 'cleansers', price: { amount: '100.00', currency: 'USD' }, compare_at_price: null, in_stock: true,
     checked_at: new Date().toISOString(), image_url: null, ingredients: ['Aqua'], description: null, how_to_use: null,
     cautions: null, concern_codes: [], reason: 'Gentle for dry skin.', reason_codes: [], routine: null, person_cautions: [],
+    ingredient_flags: [], ingredient_flags_basis: null,
   });
   const savedRow = (id: string, over: Partial<SavedProduct> = {}): SavedProduct => ({
     key: `target.com|${id}`, product_id: `p-${id}`, variant_id: `v-${id}`, name: id, brand: 'B', category_code: 'cleansers',
-    amount: '108.50', currency_code: 'USD', in_stock: true, restriction_codes: [], ...over,
+    amount: '108.50', currency_code: 'USD', in_stock: true, restriction_codes: [], flagged_codes: [], ...over,
   });
   const result = (products: AiProduct[]): AiResult => ({
     response: { schema_version: '1.0', model_version: 'm1', confidence: 'medium', summary: 'S', limitations: ['From AI'], products, safety: { refer_to_professional: false, reason: null } },

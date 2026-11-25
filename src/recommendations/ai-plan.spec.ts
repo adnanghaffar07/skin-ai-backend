@@ -44,6 +44,8 @@ const ai = (id: string, category = 'cleansers', reason: string | null = `Why ${i
   reason_codes: ['concern:dryness_dehydration'],
   routine: null,
   person_cautions: [],
+  ingredient_flags: [],
+  ingredient_flags_basis: null,
 });
 
 const saved = (id: string, over: Partial<SavedProduct> = {}): SavedProduct => ({
@@ -57,6 +59,7 @@ const saved = (id: string, over: Partial<SavedProduct> = {}): SavedProduct => ({
   currency_code: 'USD',
   in_stock: true,
   restriction_codes: [],
+  flagged_codes: [],
   ...over,
 });
 
@@ -76,9 +79,17 @@ describe('toAiRequest', () => {
       avoid_codes: [],
       monthly_budget: '20_50',
       product_interests: ['cleansers', 'moisturizers'],
+      owned_products: [],
     });
     expect(request.limits.categories).toEqual(['cleansers', 'moisturizers']);
     expect(JSON.stringify(request)).not.toMatch(/user|email|birth|name/i);
+  });
+
+  it('sends the skincare shelf as owned_products, at most 60', () => {
+    const shelf = Array.from({ length: 65 }, (_, i) => ({ name: `Cleanser ${i}`, brand: i ? null : 'CeraVe', category: i ? null : 'cleansers' }));
+    const request = toAiRequest(profile({ owned_products: shelf }), 'US', 'USD', 'r1');
+    expect(request.profile.owned_products).toHaveLength(60);
+    expect(request.profile.owned_products?.[0]).toEqual({ name: 'Cleanser 0', brand: 'CeraVe', category: 'cleansers' });
   });
 });
 
@@ -115,6 +126,24 @@ describe('planFromAi', () => {
     const plan = planFromAi([ai('r')], [saved('r', { restriction_codes: ['retinol'] })], profile({ age_range: 'under_18', categories: ['cleansers'] }));
     expect(plan.products).toEqual([]);
     expect(plan.limitations).toContain('under_18_active_removed');
+  });
+
+  it('removes a product flagged with an avoided ingredient even when its full list is unknown', () => {
+    const plan = planFromAi(
+      [ai('flagged'), ai('ok', 'moisturizers')],
+      [saved('flagged', { restriction_codes: null, flagged_codes: ['fragrance'] }), saved('ok', { category_code: 'moisturizers' })],
+      profile({ avoid_codes: ['fragrance'] }),
+    );
+    expect(plan.products.map((p) => p.id)).toEqual(['p-ok']);
+    expect(plan.limitations).toContain('avoided_ingredient_removed');
+    expect(plan.limitations).not.toContain('ingredient_data_missing');
+  });
+
+  it('holds back a product flagged with retinol for under-18s, and shows flags in what it contains', () => {
+    const minor = planFromAi([ai('r')], [saved('r', { restriction_codes: null, flagged_codes: ['retinol'] })], profile({ age_range: 'under_18', categories: ['cleansers'] }));
+    expect(minor.products).toEqual([]);
+    const adult = planFromAi([ai('r')], [saved('r', { restriction_codes: ['fragrance'], flagged_codes: ['retinol'] })], profile({ categories: ['cleansers'] }));
+    expect(adult.products[0].restriction_codes).toEqual(['fragrance', 'retinol']);
   });
 
   it('builds the routine from the first pick of each category', () => {

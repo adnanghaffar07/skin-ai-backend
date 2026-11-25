@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AiModule } from '../ai/ai.module.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { UsersModule } from '../users/users.module.js';
 import { AdminOrdersController } from './admin-orders.controller.js';
@@ -12,7 +13,7 @@ import { PaymentsController } from './payments.controller.js';
 import { StripeClient } from './stripe.js';
 
 @Module({
-  imports: [UsersModule],
+  imports: [UsersModule, AiModule],
   controllers: [OrdersController, PaymentsController, AdminOrdersController],
   providers: [
     OrdersRepository,

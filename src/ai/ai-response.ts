@@ -2,9 +2,11 @@ import { toCents } from '../pricing/pricing.js';
 import {
   AI_CATEGORIES,
   AI_FREQUENCIES,
+  AI_INGREDIENT_FLAGS,
   type AiCategory,
   type AiConfidence,
   type AiFrequency,
+  type AiIngredientFlag,
   type AiProduct,
   type AiRecommendResponse,
   type AiRoutine,
@@ -124,6 +126,13 @@ function product(raw: unknown, currency: string, now: Date): AiProduct | string 
     reason_codes: strings(raw.reason_codes, 64),
     routine: routine(raw.routine),
     person_cautions: strings(raw.person_cautions, 300).slice(0, 5),
+    ingredient_flags: strings(raw.ingredient_flags, 32).filter((flag): flag is AiIngredientFlag =>
+      (AI_INGREDIENT_FLAGS as readonly string[]).includes(flag),
+    ),
+    ingredient_flags_basis:
+      raw.ingredient_flags_basis === 'ingredient_list' || raw.ingredient_flags_basis === 'name_and_description'
+        ? raw.ingredient_flags_basis
+        : null,
   };
 }
 

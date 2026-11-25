@@ -83,6 +83,17 @@ describe('parseAiResponse', () => {
     expect(response.products[0].image_url).toBeNull();
   });
 
+  it('reads ingredient flags and their basis (contract 1.1), ignoring unknown flags', () => {
+    const { response } = parseAiResponse(
+      body([item({ ingredient_flags: ['fragrance', 'essential_oil', 'glitter'], ingredient_flags_basis: 'name_and_description' })]),
+      'USD',
+      now,
+    );
+    expect(response.products[0]).toMatchObject({ ingredient_flags: ['fragrance', 'essential_oil'], ingredient_flags_basis: 'name_and_description' });
+    const older = parseAiResponse(body([item()]), 'USD', now).response.products[0];
+    expect(older).toMatchObject({ ingredient_flags: [], ingredient_flags_basis: null });
+  });
+
   it('accepts a numeric price', () => {
     const { response } = parseAiResponse(body([item({ price: { amount: 100, currency: 'USD' } })]), 'USD', now);
     expect(response.products[0].price.amount).toBe('100.00');

@@ -1,5 +1,8 @@
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AiRecommender } from '../ai/ai-recommender.js';
+import { MARKUP_BP } from '../ai/ai.module.js';
+import { ProductIntakeRepository } from '../ai/product-intake.repository.js';
 import type { AuthenticatedUser } from '../auth/authenticated-user.js';
 import { ErrorCode } from '../common/filters/error-codes.js';
 import { ApiException } from '../common/http/api.exception.js';
@@ -15,7 +18,7 @@ import {
   ShippingOption,
 } from './dto/order.dto.js';
 import { OrderEmailsService } from './order-emails.js';
-import { OrderItemRow, OrderRow, OrdersRepository } from './orders.repository.js';
+import { OrderableProduct, OrderItemRow, OrderRow, OrdersRepository } from './orders.repository.js';
 import { StripeClient, StripeError, StripeEvent, StripeSession, verifyStripeSignature } from './stripe.js';
 
 export const STRIPE_CLIENT = Symbol('STRIPE_CLIENT');
@@ -31,6 +34,8 @@ const SHIPPING_LABEL: Record<ShippingOption, string> = {
 const PAYMENT_WINDOW_SECONDS = 60 * 60;
 /** At most this many waiting orders are checked with Stripe when someone opens their order list. */
 const SYNC_ON_LIST = 5;
+/** Shopify lets a store price be used for 10 minutes; an older one is checked again before charging. */
+const PRICE_FRESH_MS = 10 * 60 * 1000;
 
 /** What asking Stripe about a waiting order changed. */
 export type PaymentSync = 'paid' | 'expired' | null;
@@ -50,6 +55,10 @@ export class OrdersService {
     private readonly config: ConfigService,
     private readonly orderEmails: OrderEmailsService,
     @Optional() @Inject(STRIPE_CLIENT) private readonly stripe: StripeClient | null = null,
+    // Explicit tokens: with "| null" types Nest cannot tell which provider to inject.
+    @Optional() @Inject(AiRecommender) private readonly ai: AiRecommender | null = null,
+    @Optional() @Inject(ProductIntakeRepository) private readonly intake: ProductIntakeRepository | null = null,
+    @Optional() @Inject(MARKUP_BP) private readonly markupBp: number | null = null,
   ) {}
 
   paymentsConfig(): PaymentsConfigDto {
@@ -78,7 +87,11 @@ export class OrdersService {
     for (const item of body.items) {
       quantities.set(item.product_id, Math.min(10, (quantities.get(item.product_id) ?? 0) + item.quantity));
     }
-    const products = await this.repo.loadProducts([...quantities.keys()], body.market_code);
+    let products = await this.repo.loadProducts([...quantities.keys()], body.market_code);
+    // The price charged must be the store's price right now plus the markup, and the product must still be in stock.
+    if (await this.confirmLivePrices(products, body.market_code)) {
+      products = await this.repo.loadProducts([...quantities.keys()], body.market_code);
+    }
     const byId = new Map(products.map((product) => [product.id, product]));
     const unavailable = [...quantities.keys()].filter((id) => {
       const product = byId.get(id);
@@ -188,6 +201,76 @@ export class OrdersService {
         break;
     }
     return { received: true };
+  }
+
+  /**
+   * Rechecks store price and stock with the AI service (POST /v1/product-check) for products it found, just before an
+   * order is placed. Saves what it learns, then stops the order when something sold out or Clara's price changed, so
+   * the customer is never charged an old price. Returns true when prices were saved again (so they are reloaded).
+   * When the check cannot be done, prices checked in the last 10 minutes are still used; older ones are not.
+   */
+  private async confirmLivePrices(products: OrderableProduct[], market: string): Promise<boolean> {
+    const live = products.filter((product) => product.offer_source === 'ai' && product.retailer_external_id);
+    if (live.length === 0 || !this.ai || !this.intake || this.markupBp === null) {
+      return false;
+    }
+    let checks: Awaited<ReturnType<AiRecommender['checkProducts']>>;
+    try {
+      checks = await this.ai.checkProducts([...new Set(live.map((product) => product.retailer_external_id!))], market);
+    } catch (error) {
+      this.logger.warn(`Live price check failed: ${String(error)}`);
+      checks = null;
+    }
+    if (!checks) {
+      const fresh = (product: OrderableProduct) =>
+        !!product.offer_checked_at && Date.now() - new Date(product.offer_checked_at).getTime() < PRICE_FRESH_MS;
+      if (live.every(fresh)) {
+        return false;
+      }
+      throw new ApiException(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        ErrorCode.PRICE_CHECK_FAILED,
+        "We couldn't confirm today's prices with the store. Please try again in a minute.",
+      );
+    }
+    const byExternalId = new Map(checks.map((check) => [check.external_id, check]));
+    const soldOut: OrderableProduct[] = [];
+    const changed: { product: OrderableProduct; amount: string }[] = [];
+    for (const product of live) {
+      const check = byExternalId.get(product.retailer_external_id!);
+      const usable = check?.status === 'ok' && check.price && check.price.currency === product.currency_code;
+      const storePrice = usable ? check.price! : { amount: product.store_amount ?? '0', currency: product.currency_code ?? '' };
+      const amount = await this.intake.applyCheck(
+        product.id,
+        market,
+        product.retailer_external_id!,
+        { amount: storePrice.amount, currency: storePrice.currency, inStock: !!usable, url: check?.url ?? null },
+        this.markupBp,
+      );
+      if (!usable) {
+        soldOut.push(product);
+      } else if (product.amount === null || toCents(amount) !== toCents(product.amount)) {
+        changed.push({ product, amount });
+      }
+    }
+    if (soldOut.length > 0) {
+      throw new ApiException(
+        409,
+        ErrorCode.PRODUCT_UNAVAILABLE,
+        `${soldOut.map((product) => product.name).join(' and ')} just sold out at the store. Remove ${soldOut.length > 1 ? 'them' : 'it'} from your cart to continue.`,
+        [{ product_ids: soldOut.map((product) => product.id) }],
+      );
+    }
+    if (changed.length > 0) {
+      const money = (amount: string) => `${changed[0]!.product.currency_code === 'USD' ? '$' : ''}${amount}`;
+      throw new ApiException(
+        409,
+        ErrorCode.PRICE_CHANGED,
+        `The store changed its price: ${changed.map(({ product, amount }) => `${product.name} is now ${money(amount)}`).join(', ')}. Tap Place Order again to continue at the new price.`,
+        [{ products: changed.map(({ product, amount }) => ({ product_id: product.id, amount })) }],
+      );
+    }
+    return true;
   }
 
   /**

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { HttpAiRecommender } from './ai-recommender.js';
+import { HttpAiRecommender, parseProductChecks } from './ai-recommender.js';
 import { identifiersOf, slugify, suitableFor } from './product-intake.repository.js';
 import { StubAiRecommender } from './stub-ai-recommender.js';
 import type { AiRecommendRequest } from './ai.types.js';
@@ -98,6 +98,45 @@ describe('HttpAiRecommender', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('<html>', { status: 200 }));
     const ai = new HttpAiRecommender('https://ai.example.com', 'k', 1000, fetchMock);
     await expect(ai.recommend(request)).rejects.toMatchObject({ code: 'AI_BAD_JSON' });
+  });
+});
+
+describe('HttpAiRecommender.checkProducts (contract 1.1)', () => {
+  const check = (external_id: string, over: Record<string, unknown> = {}) => ({
+    external_id, status: 'ok', price: { amount: '14.00', currency: 'USD' }, in_stock: true, url: `https://s.com/${external_id}`, ...over,
+  });
+
+  it('posts the ids with the key, 50 at a time', async () => {
+    const ids = Array.from({ length: 51 }, (_, i) => `id${i}`);
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const sent = JSON.parse(init.body as string) as { external_ids: string[] };
+      return json(200, { items: sent.external_ids.map((id) => check(id)) });
+    });
+    const ai = new HttpAiRecommender('https://ai.example.com', 'secret', 1000, fetchMock as unknown as typeof fetch);
+    const items = await ai.checkProducts(ids, 'US');
+    expect(items).toHaveLength(51);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://ai.example.com/v1/product-check');
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer secret' });
+    expect(JSON.parse(init.body as string)).toMatchObject({ market: 'US', external_ids: ids.slice(0, 50) });
+  });
+
+  it('reports a failed check so the caller can decide', async () => {
+    const ai = new HttpAiRecommender('https://ai.example.com', 'secret', 1000, vi.fn().mockResolvedValue(json(502, {})));
+    await expect(ai.checkProducts(['a'], 'US')).rejects.toMatchObject({ code: 'AI_HTTP_502' });
+  });
+
+  it('treats an ok item without a usable price, or an unknown status, as not found', () => {
+    expect(parseProductChecks({ items: [check('a'), check('b', { price: null }), check('c', { status: 'weird' }), { status: 'ok' }] })).toEqual([
+      { external_id: 'a', status: 'ok', price: { amount: '14.00', currency: 'USD' }, in_stock: true, url: 'https://s.com/a' },
+      { external_id: 'b', status: 'not_found', price: null, in_stock: false, url: 'https://s.com/b' },
+      { external_id: 'c', status: 'not_found', price: { amount: '14.00', currency: 'USD' }, in_stock: false, url: 'https://s.com/c' },
+    ]);
+  });
+
+  it('the stand-in cannot check, so it says so', async () => {
+    expect(await new StubAiRecommender().checkProducts(['a'], 'US')).toBeNull();
   });
 });
 

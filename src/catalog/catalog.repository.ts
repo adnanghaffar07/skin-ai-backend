@@ -40,10 +40,14 @@ const SUMMARY_SELECT = `
   (select m.url from public.product_media m where m.product_id = p.id order by m.position limit 1) as image_url,
   a.badge_code, p.benefits, p.suitable_for,
   coalesce((
-    select array_agg(distinct r.restriction_code)
-    from public.product_ingredients pi
-    join public.ingredient_restrictions r on r.ingredient_id = pi.ingredient_id
-    where pi.product_id = p.id
+    select array_agg(distinct code) from (
+      select r.restriction_code as code
+      from public.product_ingredients pi
+      join public.ingredient_restrictions r on r.ingredient_id = pi.ingredient_id
+      where pi.product_id = p.id
+      union
+      select unnest(p.ingredient_flags)
+    ) codes
   ), '{}') as restriction_codes,
   coalesce((
     select array_agg(i.inci_name order by pi.position)

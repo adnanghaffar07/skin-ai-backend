@@ -59,6 +59,9 @@ export function scanLevels(scan: AiScan | null): AiScanLevels | null {
   return redness && shine && darkCircles && blemishes ? { redness, shine, darkCircles, blemishes } : null;
 }
 
+/** The AI service reads at most this many shelf products. */
+const AI_MAX_OWNED = 60;
+
 export function toAiRequest(
   profile: ProfileContext,
   market: string,
@@ -84,6 +87,7 @@ export function toAiRequest(
       avoid_codes: profile.avoid_codes,
       monthly_budget: profile.budget_band,
       product_interests: profile.categories,
+      owned_products: (profile.owned_products ?? []).slice(0, AI_MAX_OWNED),
     },
     scan: scanLevels(scan),
     limits: { max_products: AI_MAX_PRODUCTS, categories: wantedCategories(profile.categories) },
@@ -135,11 +139,17 @@ export function planFromAi(found: AiProduct[], saved: SavedProduct[], profile: P
       limitations.add('out_of_stock_removed');
       continue;
     }
+    // A flag says the ingredient is there even when the full list is unknown, so it is checked first.
+    const flagged = row.flagged_codes ?? [];
+    if (flagged.some((code) => profile.avoid_codes.includes(code))) {
+      limitations.add('avoided_ingredient_removed');
+      continue;
+    }
     if (profile.avoid_codes.length > 0 && row.restriction_codes === null) {
       limitations.add('ingredient_data_missing');
       continue;
     }
-    const restrictions = row.restriction_codes ?? [];
+    const restrictions = [...new Set([...(row.restriction_codes ?? []), ...flagged])].sort();
     if (restrictions.some((code) => profile.avoid_codes.includes(code))) {
       limitations.add('avoided_ingredient_removed');
       continue;
