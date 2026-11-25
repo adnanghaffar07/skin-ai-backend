@@ -257,7 +257,7 @@ export class OrdersService {
       throw new ApiException(
         409,
         ErrorCode.PRODUCT_UNAVAILABLE,
-        `${soldOut.map((product) => product.name).join(' and ')} just sold out at the store. Remove ${soldOut.length > 1 ? 'them' : 'it'} from your cart to continue.`,
+        `${soldOut.map((product) => product.name).join(' and ')} ${soldOut.length > 1 ? 'are' : 'is'} no longer available at the store. Remove ${soldOut.length > 1 ? 'them' : 'it'} from your cart to continue.`,
         [{ product_ids: soldOut.map((product) => product.id) }],
       );
     }
@@ -271,6 +271,46 @@ export class OrdersService {
       );
     }
     return true;
+  }
+
+  /**
+   * The daily job: rechecks store price and stock for every product the AI found that Clara shows as in stock, so the
+   * shop hides what can no longer be bought (sold out, or not in the store catalogue any more) before anyone adds it.
+   */
+  async refreshLiveOffers(limit = 200): Promise<{ checked: number; unavailable: number; repriced: number }> {
+    if (!this.ai || !this.intake || this.markupBp === null) {
+      return { checked: 0, unavailable: 0, repriced: 0 };
+    }
+    const offers = await this.repo.listLiveOffers(limit);
+    let unavailable = 0;
+    let repriced = 0;
+    for (const market of new Set(offers.map((offer) => offer.market_code))) {
+      const here = offers.filter((offer) => offer.market_code === market);
+      const checks = await this.ai.checkProducts([...new Set(here.map((offer) => offer.external_id))], market);
+      if (!checks) {
+        continue;
+      }
+      const byId = new Map(checks.map((check) => [check.external_id, check]));
+      for (const offer of here) {
+        const check = byId.get(offer.external_id);
+        const usable = check?.status === 'ok' && check.price && check.price.currency === offer.store_currency_code;
+        await this.intake.applyCheck(
+          offer.product_id,
+          market,
+          offer.external_id,
+          usable
+            ? { amount: check.price!.amount, currency: check.price!.currency, inStock: true, url: check.url }
+            : { amount: offer.store_amount, currency: offer.store_currency_code, inStock: false, url: check?.url ?? null },
+          this.markupBp,
+        );
+        if (!usable) {
+          unavailable += 1;
+        } else if (toCents(check.price!.amount) !== toCents(offer.store_amount)) {
+          repriced += 1;
+        }
+      }
+    }
+    return { checked: offers.length, unavailable, repriced };
   }
 
   /**

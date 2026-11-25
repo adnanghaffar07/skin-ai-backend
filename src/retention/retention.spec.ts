@@ -54,7 +54,7 @@ describe('retention', () => {
   it('hides the route without a secret and refuses a wrong one', async () => {
     const { retention } = service();
     const alerts = { dailySummary: vi.fn(async () => { throw new Error('mail down'); }) } as unknown as AlertsService;
-    const orders = { syncPendingPayments: vi.fn(async () => ({ checked: 1, paid: 1, expired: 0 })) } as unknown as OrdersService;
+    const orders = { syncPendingPayments: vi.fn(async () => ({ checked: 1, paid: 1, expired: 0 })), refreshLiveOffers: vi.fn(async () => ({ checked: 3, unavailable: 1, repriced: 0 })) } as unknown as OrdersService;
     const off = new RetentionController(retention, { get: () => undefined } as unknown as ConfigService, alerts, orders);
     await expect(off.run('Bearer x')).rejects.toMatchObject({ status: 404 });
     const on = new RetentionController(retention, { get: (key: string) => (key === 'CRON_SECRET' ? 'right' : undefined) } as unknown as ConfigService, alerts, orders);
@@ -63,6 +63,7 @@ describe('retention', () => {
     await expect(on.run('Bearer right')).resolves.toEqual({
       retention: expect.objectContaining({ skipped: ['photos', 'scan_results', 'logs'] }),
       pending_payments: { checked: 1, paid: 1, expired: 0 },
+      live_offers: { checked: 3, unavailable: 1, repriced: 0 },
       daily_check: { error: 'daily check failed: mail down' },
     });
   });

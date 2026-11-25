@@ -110,7 +110,7 @@ export class RetentionController {
     private readonly orders: OrdersService,
   ) {}
 
-  /** The once-a-day job: retention, unpaid orders checked with Stripe, then the daily check email. One part failing does not stop the rest. */
+  /** The once-a-day job: retention, unpaid orders checked with Stripe, store stock and prices rechecked, then the daily check email. One part failing does not stop the rest. */
   @Get('daily')
   @HttpCode(200)
   async run(@Headers('authorization') authorization: string | undefined): Promise<Record<string, unknown>> {
@@ -132,6 +132,7 @@ export class RetentionController {
     return {
       retention: await part('retention', () => this.retention.run(retentionSettings(key => this.config.get(key)))),
       pending_payments: await part('pending payments', () => this.orders.syncPendingPayments(50)),
+      live_offers: await part('live offers', () => this.orders.refreshLiveOffers(200)),
       daily_check: await part('daily check', () => this.alerts.dailySummary()),
     };
   }

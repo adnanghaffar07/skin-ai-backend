@@ -224,6 +224,17 @@ export class OrdersRepository {
     return this.database.query(`select total_amount::text, currency_code from public.orders where id = $1`, [orderId]);
   }
 
+  /** Store offers found by the AI that Clara shows as in stock, least recently checked first. */
+  listLiveOffers(limit = 200): Promise<{ product_id: string; market_code: string; external_id: string; store_amount: string; store_currency_code: string }[]> {
+    return this.database.query(
+      `select o.product_id, o.market_code, o.external_id, o.store_amount::text as store_amount, o.store_currency_code
+       from public.product_offers o join public.products p on p.id = o.product_id
+       where o.source = 'ai' and o.in_stock and p.status = 'active' and p.deleted_at is null
+       order by o.checked_at limit $1`,
+      [limit],
+    );
+  }
+
   /** Orders waiting for payment that have a Stripe page, from the last two days (Stripe's page lasts at most 24 hours). */
   listPendingPayments(limit = 50): Promise<OrderRow[]> {
     return this.database.query<OrderRow>(

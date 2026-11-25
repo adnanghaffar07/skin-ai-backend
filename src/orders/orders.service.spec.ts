@@ -188,7 +188,7 @@ describe('OrdersService.create: live price and stock check before charging', () 
     const { service, repository } = build({}, {}, { checkProducts: vi.fn().mockResolvedValue(checks), applyCheck });
     await expect(service.create(user, 'k', body())).rejects.toMatchObject({
       status: 409,
-      response: { code: 'PRODUCT_UNAVAILABLE', message: 'Product a and Product b just sold out at the store. Remove them from your cart to continue.' },
+      response: { code: 'PRODUCT_UNAVAILABLE', message: 'Product a and Product b are no longer available at the store. Remove them from your cart to continue.' },
     });
     expect(applyCheck).toHaveBeenCalledWith('b', 'US', 'b', expect.objectContaining({ inStock: false }), 850);
     expect(repository.create).not.toHaveBeenCalled();
@@ -213,6 +213,30 @@ describe('OrdersService.create: live price and stock check before charging', () 
     const { service } = build({ loadProducts: manual }, {}, { checkProducts });
     await service.create(user, 'k', body());
     expect(checkProducts).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrdersService.refreshLiveOffers (daily job)', () => {
+  it('saves fresh prices and hides products the store no longer has', async () => {
+    const listLiveOffers = vi.fn().mockResolvedValue([
+      { product_id: 'a', market_code: 'US', external_id: '111', store_amount: '18.00', store_currency_code: 'USD' },
+      { product_id: 'b', market_code: 'US', external_id: 'old-slug', store_amount: '12.20', store_currency_code: 'USD' },
+      { product_id: 'c', market_code: 'US', external_id: '222', store_amount: '9.00', store_currency_code: 'USD' },
+    ]);
+    const checkProducts = vi.fn().mockResolvedValue([
+      { external_id: '111', status: 'ok', price: { amount: '18.00', currency: 'USD' }, in_stock: true, url: 'https://s.com/111' },
+      { external_id: 'old-slug', status: 'not_found', price: null, in_stock: false, url: null },
+      { external_id: '222', status: 'ok', price: { amount: '10.00', currency: 'USD' }, in_stock: true, url: 'https://s.com/222' },
+    ]);
+    const applyCheck = vi.fn().mockResolvedValue('0.00');
+    const { service } = build({ listLiveOffers }, {}, { checkProducts, applyCheck });
+    expect(await service.refreshLiveOffers()).toEqual({ checked: 3, unavailable: 1, repriced: 1 });
+    expect(applyCheck).toHaveBeenCalledWith('b', 'US', 'old-slug', { amount: '12.20', currency: 'USD', inStock: false, url: null }, 850);
+    expect(applyCheck).toHaveBeenCalledWith('c', 'US', '222', { amount: '10.00', currency: 'USD', inStock: true, url: 'https://s.com/222' }, 850);
+  });
+
+  it('does nothing without the AI service', async () => {
+    expect(await build().service.refreshLiveOffers()).toEqual({ checked: 0, unavailable: 0, repriced: 0 });
   });
 });
 
