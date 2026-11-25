@@ -10,6 +10,8 @@ import { ObjectStorage } from '../storage/object-storage.js';
 import { AlertsService } from '../alerts/alerts.js';
 import { CatalogModule } from '../catalog/catalog.module.js';
 import { ProductImagesService } from '../catalog/product-images.js';
+import { OrdersModule } from '../orders/orders.module.js';
+import { OrdersService } from '../orders/orders.service.js';
 
 /**
  * Automatic deletion after a retention period (compliance plan: "Nothing deletes old photos or scans today").
@@ -18,7 +20,8 @@ import { ProductImagesService } from '../catalog/product-images.js';
  *   RETENTION_SCAN_DAYS   scan readings synced from the app (scan_results)
  *   RETENTION_LOG_DAYS    audit log and app analytics events
  * Vercel Cron calls GET /api/v1/cron/daily once a day with "Authorization: Bearer <CRON_SECRET>". The same daily job copies
- * new product photos into Clara storage and emails the daily check (AlertsService).
+ * new product photos into Clara storage, checks unpaid orders with Stripe in case a webhook was missed, and emails the
+ * daily check (AlertsService).
  */
 export type RetentionSettings = { photoDays?: number; scanDays?: number; logDays?: number };
 export type RetentionResult = { photos: number; photo_files_failed: number; scan_results: number; audit_events: number; analytics_events: number; skipped: string[] };
@@ -107,9 +110,10 @@ export class RetentionController {
     private readonly config: ConfigService,
     private readonly images: ProductImagesService,
     private readonly alerts: AlertsService,
+    private readonly orders: OrdersService,
   ) {}
 
-  /** The once-a-day job: retention, then product photos, then the daily check email. One part failing does not stop the rest. */
+  /** The once-a-day job: retention, product photos, unpaid orders checked with Stripe, then the daily check email. One part failing does not stop the rest. */
   @Get('daily')
   @HttpCode(200)
   async run(@Headers('authorization') authorization: string | undefined): Promise<Record<string, unknown>> {
@@ -131,13 +135,14 @@ export class RetentionController {
     return {
       retention: await part('retention', () => this.retention.run(retentionSettings(key => this.config.get(key)))),
       product_images: await part('product images', () => this.images.copy(200)),
+      pending_payments: await part('pending payments', () => this.orders.syncPendingPayments(50)),
       daily_check: await part('daily check', () => this.alerts.dailySummary()),
     };
   }
 }
 
 @Module({
-  imports: [CatalogModule],
+  imports: [CatalogModule, OrdersModule],
   controllers: [RetentionController],
   providers: [RetentionService],
 })

@@ -30,5 +30,7 @@ import { StripeClient } from './stripe.js';
       },
     },
   ],
+  // The daily job checks unpaid orders with Stripe.
+  exports: [OrdersService],
 })
 export class OrdersModule {}

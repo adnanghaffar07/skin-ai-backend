@@ -16,7 +16,7 @@ import {
 } from './dto/order.dto.js';
 import { OrderEmailsService } from './order-emails.js';
 import { OrderItemRow, OrderRow, OrdersRepository } from './orders.repository.js';
-import { StripeClient, StripeError, StripeEvent, verifyStripeSignature } from './stripe.js';
+import { StripeClient, StripeError, StripeEvent, StripeSession, verifyStripeSignature } from './stripe.js';
 
 export const STRIPE_CLIENT = Symbol('STRIPE_CLIENT');
 
@@ -29,6 +29,11 @@ const SHIPPING_LABEL: Record<ShippingOption, string> = {
 };
 /** How long Stripe's payment page stays open before an unpaid order is cancelled. */
 const PAYMENT_WINDOW_SECONDS = 60 * 60;
+/** At most this many waiting orders are checked with Stripe when someone opens their order list. */
+const SYNC_ON_LIST = 5;
+
+/** What asking Stripe about a waiting order changed. */
+export type PaymentSync = 'paid' | 'expired' | null;
 
 const iso = (value: Date | null) => (value ? value.toISOString() : null);
 
@@ -125,14 +130,24 @@ export class OrdersService {
   }
 
   async list(user: AuthenticatedUser): Promise<OrderListDto> {
-    const orders = await this.repo.listForUser(user.id);
+    let orders = await this.repo.listForUser(user.id);
+    // Orders still waiting for payment are checked with Stripe first, in case its webhook did not arrive.
+    const waiting = orders.filter((order) => this.canSync(order)).slice(0, SYNC_ON_LIST);
+    const changed = await Promise.all(waiting.map((order) => this.syncPayment(order)));
+    if (changed.some(Boolean)) {
+      orders = await this.repo.listForUser(user.id);
+    }
     return { items: await this.present(orders) };
   }
 
   async get(user: AuthenticatedUser, orderId: string): Promise<CreatedOrderDto> {
-    const order = await this.repo.findForUser(user.id, orderId);
+    let order = await this.repo.findForUser(user.id, orderId);
     if (!order) {
       throw new ApiException(404, ErrorCode.NOT_FOUND, 'Order not found.');
+    }
+    // The app asks for the order when the buyer comes back from Stripe's page: check with Stripe if it is still waiting.
+    if (await this.syncPayment(order)) {
+      order = (await this.repo.findForUser(user.id, orderId)) ?? order;
     }
     const [presented] = await this.present([order]);
     return { ...presented!, checkout_url: order.status === 'pending_payment' ? order.payment_session_url : null };
@@ -161,24 +176,7 @@ export class OrdersService {
     switch (event.type) {
       case 'checkout.session.completed':
       case 'checkout.session.async_payment_succeeded': {
-        if (session.payment_status !== 'paid') {
-          break;
-        }
-        const [order] = await this.repo.findOrderTotal(orderId);
-        if (
-          !order ||
-          session.amount_total !== toCents(order.total_amount) ||
-          session.currency?.toUpperCase() !== order.currency_code
-        ) {
-          this.logger.error(`Stripe ${event.id}: amount or currency does not match order ${orderId}; not marked paid.`);
-          break;
-        }
-        const paid = await this.repo.markPaid(orderId, session.id, session.payment_intent ?? null);
-        this.logger.log(paid ? `Order ${orderId} paid.` : `Order ${orderId}: payment event already handled.`);
-        if (paid) {
-          // Awaited so the serverless function does not stop before Resend answers; it never throws.
-          await this.orderEmails.send(orderId, 'paid');
-        }
+        await this.settlePaid(orderId, session, `Stripe ${event.id}`);
         break;
       }
       case 'checkout.session.expired':
@@ -190,6 +188,69 @@ export class OrdersService {
         break;
     }
     return { received: true };
+  }
+
+  /**
+   * The safety net for a missing webhook: asks Stripe how the order's payment page stands and records the result,
+   * through the same checks as the webhook. Never throws; when Stripe cannot be reached the order is left as it was.
+   */
+  async syncPayment(order: OrderRow): Promise<PaymentSync> {
+    if (!this.canSync(order)) {
+      return null;
+    }
+    try {
+      const session = await this.stripe!.getCheckoutSession(order.payment_session_id!);
+      if (session.payment_status === 'paid') {
+        return (await this.settlePaid(order.id, session, 'Stripe check')) ? 'paid' : null;
+      }
+      if (session.status === 'expired' && (await this.repo.markPaymentExpired(order.id, session.id))) {
+        this.logger.log(`Order ${order.id} cancelled: payment page expired (Stripe check).`);
+        return 'expired';
+      }
+    } catch (error) {
+      this.logger.warn(`Stripe check for order ${order.id} failed: ${String(error)}`);
+    }
+    return null;
+  }
+
+  /** The daily job: every order still waiting for payment is checked with Stripe, for buyers who never reopen the app. */
+  async syncPendingPayments(limit = 50): Promise<{ checked: number; paid: number; expired: number }> {
+    const orders = await this.repo.listPendingPayments(limit);
+    const results = [];
+    for (const order of orders) {
+      results.push(await this.syncPayment(order));
+    }
+    return {
+      checked: orders.length,
+      paid: results.filter((result) => result === 'paid').length,
+      expired: results.filter((result) => result === 'expired').length,
+    };
+  }
+
+  private canSync(order: OrderRow): boolean {
+    return this.stripe !== null && order.status === 'pending_payment' && !!order.payment_session_id;
+  }
+
+  /**
+   * Marks an order paid once Stripe says it is, but only if Stripe charged exactly the order's total in its currency.
+   * Shared by the webhook and the Stripe check, so both apply the same rules; the database ignores a second call.
+   */
+  private async settlePaid(orderId: string, session: StripeSession, source: string): Promise<boolean> {
+    if (session.payment_status !== 'paid') {
+      return false;
+    }
+    const [order] = await this.repo.findOrderTotal(orderId);
+    if (!order || session.amount_total !== toCents(order.total_amount) || session.currency?.toUpperCase() !== order.currency_code) {
+      this.logger.error(`${source}: amount or currency does not match order ${orderId}; not marked paid.`);
+      return false;
+    }
+    const paid = await this.repo.markPaid(orderId, session.id, session.payment_intent ?? null);
+    this.logger.log(paid ? `Order ${orderId} paid (${source}).` : `Order ${orderId}: payment already recorded.`);
+    if (paid) {
+      // Awaited so the serverless function does not stop before Resend answers; it never throws.
+      await this.orderEmails.send(orderId, 'paid');
+    }
+    return paid;
   }
 
   /** Opens (or reopens) Stripe's payment page for an order that is still waiting for payment. */

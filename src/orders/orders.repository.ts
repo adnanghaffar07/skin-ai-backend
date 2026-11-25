@@ -220,6 +220,16 @@ export class OrdersRepository {
     return this.database.query(`select total_amount::text, currency_code from public.orders where id = $1`, [orderId]);
   }
 
+  /** Orders waiting for payment that have a Stripe page, from the last two days (Stripe's page lasts at most 24 hours). */
+  listPendingPayments(limit = 50): Promise<OrderRow[]> {
+    return this.database.query<OrderRow>(
+      `select ${ORDER_COLUMNS} from public.orders o
+       where o.status = 'pending_payment' and o.payment_session_id is not null and o.created_at > now() - interval '2 days'
+       order by o.created_at limit $1`,
+      [limit],
+    );
+  }
+
   listForUser(userId: string, limit = 50): Promise<OrderRow[]> {
     return this.database.query<OrderRow>(
       `select ${ORDER_COLUMNS} from public.orders o where o.user_id = $1 order by o.created_at desc limit $2`,

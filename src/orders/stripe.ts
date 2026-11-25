@@ -96,6 +96,19 @@ export class StripeClient {
     }
     return { id: body.id, url: body.url };
   }
+
+  /** Asks Stripe how a Checkout Session stands: the safety net for when a webhook does not arrive. */
+  async getCheckoutSession(id: string): Promise<StripeSession> {
+    const response = await this.fetchFn(`${STRIPE_API}/checkout/sessions/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${this.secretKey}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    const body = (await response.json().catch(() => ({}))) as StripeSession & { error?: { message?: string } };
+    if (!response.ok || body.id !== id) {
+      throw new StripeError(body.error?.message ?? `Stripe returned ${response.status}`, response.status);
+    }
+    return body;
+  }
 }
 
 /**
@@ -142,3 +155,6 @@ export interface StripeEvent {
     };
   };
 }
+
+/** A Checkout Session as Stripe returns it; `status` is open, complete or expired. */
+export type StripeSession = StripeEvent['data']['object'] & { status?: string | null };

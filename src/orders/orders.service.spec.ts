@@ -191,3 +191,79 @@ describe('OrdersService.handleStripeEvent', () => {
     expect(repository.markPaymentExpired).toHaveBeenCalledWith('o1', 'cs_1');
   });
 });
+
+describe('OrdersService payment check (safety net when the webhook does not arrive)', () => {
+  const waiting = order({ payment_session_id: 'cs_1', payment_session_url: 'https://checkout.stripe.com/c/cs_1' });
+  const session = (over: Record<string, unknown> = {}) => ({
+    id: 'cs_1',
+    status: 'complete',
+    payment_status: 'paid',
+    amount_total: 5686,
+    currency: 'usd',
+    payment_intent: 'pi_1',
+    ...over,
+  });
+
+  it('marks a waiting order paid when Stripe says it was paid, and sends the email once', async () => {
+    const getCheckoutSession = vi.fn().mockResolvedValue(session());
+    const findForUser = vi.fn().mockResolvedValueOnce(waiting).mockResolvedValueOnce({ ...waiting, status: 'paid' });
+    const { service, repository, emails } = build({ findForUser }, { getCheckoutSession });
+    const result = await service.get(user, 'o1');
+    expect(getCheckoutSession).toHaveBeenCalledWith('cs_1');
+    expect(repository.markPaid).toHaveBeenCalledWith('o1', 'cs_1', 'pi_1');
+    expect(emails.send).toHaveBeenCalledWith('o1', 'paid');
+    expect(result).toMatchObject({ status: 'paid', checkout_url: null });
+  });
+
+  it('does not mark it paid when Stripe charged a different amount', async () => {
+    const { service, repository, emails } = build({}, { getCheckoutSession: vi.fn().mockResolvedValue(session({ amount_total: 100 })) });
+    expect(await service.syncPayment(waiting)).toBeNull();
+    expect(repository.markPaid).not.toHaveBeenCalled();
+    expect(emails.send).not.toHaveBeenCalled();
+  });
+
+  it('leaves an open, unpaid page alone', async () => {
+    const { service, repository } = build({}, { getCheckoutSession: vi.fn().mockResolvedValue(session({ status: 'open', payment_status: 'unpaid' })) });
+    expect(await service.syncPayment(waiting)).toBeNull();
+    expect(repository.markPaid).not.toHaveBeenCalled();
+    expect(repository.markPaymentExpired).not.toHaveBeenCalled();
+  });
+
+  it('cancels the order when Stripe says the page expired unpaid', async () => {
+    const { service, repository } = build({}, { getCheckoutSession: vi.fn().mockResolvedValue(session({ status: 'expired', payment_status: 'unpaid' })) });
+    expect(await service.syncPayment(waiting)).toBe('expired');
+    expect(repository.markPaymentExpired).toHaveBeenCalledWith('o1', 'cs_1');
+  });
+
+  it('does not call Stripe for paid orders, orders without a page, or with payments off', async () => {
+    const getCheckoutSession = vi.fn();
+    const { service } = build({}, { getCheckoutSession });
+    expect(await service.syncPayment(order({ status: 'paid', payment_session_id: 'cs_1' }))).toBeNull();
+    expect(await service.syncPayment(order())).toBeNull();
+    expect(getCheckoutSession).not.toHaveBeenCalled();
+    expect(await build({}, null).service.syncPayment(waiting)).toBeNull();
+  });
+
+  it('keeps the order as it was when Stripe cannot be reached', async () => {
+    const { service, repository } = build({}, { getCheckoutSession: vi.fn().mockRejectedValue(new Error('timeout')) });
+    expect(await service.syncPayment(waiting)).toBeNull();
+    expect(repository.markPaid).not.toHaveBeenCalled();
+  });
+
+  it('checks waiting orders in the list and reloads it when one changed', async () => {
+    const listForUser = vi.fn().mockResolvedValueOnce([waiting, order({ id: 'o2', status: 'paid' })]).mockResolvedValueOnce([{ ...waiting, status: 'paid' }]);
+    const getCheckoutSession = vi.fn().mockResolvedValue(session());
+    const { service } = build({ listForUser }, { getCheckoutSession });
+    const { items } = await service.list(user);
+    expect(getCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(listForUser).toHaveBeenCalledTimes(2);
+    expect(items[0]).toMatchObject({ status: 'paid' });
+  });
+
+  it('the daily sweep counts what it changed', async () => {
+    const listPendingPayments = vi.fn().mockResolvedValue([waiting, order({ id: 'o2', payment_session_id: 'cs_2' })]);
+    const getCheckoutSession = vi.fn(async (id: string) => (id === 'cs_1' ? session() : session({ id: 'cs_2', status: 'expired', payment_status: 'unpaid' })));
+    const { service } = build({ listPendingPayments }, { getCheckoutSession });
+    expect(await service.syncPendingPayments()).toEqual({ checked: 2, paid: 1, expired: 1 });
+  });
+});

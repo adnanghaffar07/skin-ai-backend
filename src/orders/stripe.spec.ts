@@ -80,3 +80,18 @@ describe('StripeClient', () => {
     );
   });
 });
+
+describe('StripeClient.getCheckoutSession', () => {
+  it('reads the session with the secret key', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'cs_1', status: 'complete', payment_status: 'paid' }), { status: 200 }));
+    const session = await new StripeClient('sk_test_x', fetchFn as unknown as typeof fetch).getCheckoutSession('cs_1');
+    expect(session).toMatchObject({ id: 'cs_1', payment_status: 'paid' });
+    expect(fetchFn.mock.calls[0]![0]).toBe('https://api.stripe.com/v1/checkout/sessions/cs_1');
+    expect(fetchFn.mock.calls[0]![1].headers).toEqual({ Authorization: 'Bearer sk_test_x' });
+  });
+
+  it('throws when Stripe refuses', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: 'No such session' } }), { status: 404 }));
+    await expect(new StripeClient('sk_test_x', fetchFn as unknown as typeof fetch).getCheckoutSession('cs_x')).rejects.toMatchObject({ status: 404 });
+  });
+});
