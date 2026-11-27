@@ -103,7 +103,9 @@ function product(raw: unknown, currency: string, now: Date): AiProduct | string 
   if (checkedAt.getTime() > now.getTime() + 5 * 60 * 1000) return 'checked_at is in the future';
   if (now.getTime() - checkedAt.getTime() > STALE_PRICE_MS) return 'price is stale';
 
-  const ingredients = raw.ingredients === null || raw.ingredients === undefined ? null : strings(raw.ingredients, 160);
+  const listed = raw.ingredients === null || raw.ingredients === undefined ? null : strings(raw.ingredients, 160);
+  // A list holding pieces of JSON ("formula", [ ...) was read from page text, not a real label (QA B-06): unknown.
+  const ingredients = listed?.some((item) => /["[\]{}]/.test(item)) ? null : listed;
   return {
     external_id: externalId,
     retailer: { name: retailerName, domain: retailerDomain },

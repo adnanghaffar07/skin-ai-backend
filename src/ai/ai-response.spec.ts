@@ -94,6 +94,13 @@ describe('parseAiResponse', () => {
     expect(older).toMatchObject({ ingredient_flags: [], ingredient_flags_basis: null });
   });
 
+  it('treats an ingredient list made of text fragments as unknown (QA B-06)', () => {
+    const junk = ['"', '"formula"', '"makeup"', '"fragrance"', '"amount"]'];
+    expect(parseAiResponse(body([item({ ingredients: junk })]), 'USD', now).response.products[0].ingredients).toBeNull();
+    const real = ['Water (Aqua/Eau)', 'Glycerin', 'Zinc PCA'];
+    expect(parseAiResponse(body([item({ ingredients: real })]), 'USD', now).response.products[0].ingredients).toEqual(real);
+  });
+
   it('accepts a numeric price', () => {
     const { response } = parseAiResponse(body([item({ price: { amount: 100, currency: 'USD' } })]), 'USD', now);
     expect(response.products[0].price.amount).toBe('100.00');
