@@ -47,6 +47,10 @@ function text(value: unknown, max = MAX_TEXT): string | null {
 const strings = (value: unknown, max = 200): string[] =>
   Array.isArray(value) ? value.map((item) => text(item, max)).filter((item): item is string => !!item) : [];
 
+/** Store headings read along with the list ("Ingredients Water", "Inactive Ingredients: Glycerin") lose the heading. */
+const withoutListLabel = (item: string) =>
+  item.replace(/^(?:(?:full|active|inactive|other)\s+)?ingredients?(?:\s*[:\-\u2013]\s*|\s+|$)/i, '').trim();
+
 function httpsUrl(value: unknown): string | null {
   const url = text(value, 2048);
   if (!url) {
@@ -103,7 +107,12 @@ function product(raw: unknown, currency: string, now: Date): AiProduct | string 
   if (checkedAt.getTime() > now.getTime() + 5 * 60 * 1000) return 'checked_at is in the future';
   if (now.getTime() - checkedAt.getTime() > STALE_PRICE_MS) return 'price is stale';
 
-  const listed = raw.ingredients === null || raw.ingredients === undefined ? null : strings(raw.ingredients, 160);
+  const listed =
+    raw.ingredients === null || raw.ingredients === undefined
+      ? null
+      : strings(raw.ingredients, 160)
+          .map(withoutListLabel)
+          .filter((item) => !!item);
   // A list holding pieces of JSON ("formula", [ ...) was read from page text, not a real label (QA B-06): unknown.
   const ingredients = listed?.some((item) => /["[\]{}]/.test(item)) ? null : listed;
   return {

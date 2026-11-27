@@ -101,6 +101,15 @@ describe('parseAiResponse', () => {
     expect(parseAiResponse(body([item({ ingredients: real })]), 'USD', now).response.products[0].ingredients).toEqual(real);
   });
 
+  it('drops a store heading stuck to an ingredient', () => {
+    const raw = ['Ingredients Water (Aqua/Eau)', 'Glycerin', 'Inactive Ingredients: Zinc PCA', 'Ingredients:'];
+    expect(parseAiResponse(body([item({ ingredients: raw })]), 'USD', now).response.products[0].ingredients).toEqual([
+      'Water (Aqua/Eau)',
+      'Glycerin',
+      'Zinc PCA',
+    ]);
+  });
+
   it('accepts a numeric price', () => {
     const { response } = parseAiResponse(body([item({ price: { amount: 100, currency: 'USD' } })]), 'USD', now);
     expect(response.products[0].price.amount).toBe('100.00');
